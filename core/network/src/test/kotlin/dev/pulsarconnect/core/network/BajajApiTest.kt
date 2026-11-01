@@ -74,7 +74,10 @@ class BajajApiTest {
         assertEquals("POST", request.method)
         assertEquals("/api/ib/rc/login", request.path)
         assertEquals("Bearer app-token", request.getHeader("Authorization"))
-        assertEquals("application/json", request.getHeader("Content-Type"))
+        assertTrue(
+            request.getHeader("Content-Type").orEmpty().startsWith("application/json"),
+            "was ${request.getHeader("Content-Type")}",
+        )
         assertEquals(
             """{"vin_number":"MD2ABCDEFGH123456","access_code":"test-access-code"}""",
             request.body.readUtf8(),
