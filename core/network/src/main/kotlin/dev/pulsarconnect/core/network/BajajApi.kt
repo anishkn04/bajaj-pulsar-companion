@@ -63,6 +63,17 @@ class BajajApi(
         return payload.message == SUCCESS
     }
 
+    /** `GET /api/ib/rc/customer/vehicles` — the bikes linked to this account. */
+    suspend fun vehicles(appToken: String): List<Bike> {
+        val request = Request.Builder()
+            .url("$baseUrl/api/ib/rc/customer/vehicles")
+            .header("Authorization", "Bearer $appToken")
+            .get()
+            .build()
+
+        return json.decodeFromString<VehiclesResponse>(execute(request)).data?.data.orEmpty()
+    }
+
     private fun credentialsRequest(
         path: String,
         credentials: Credentials,
@@ -132,6 +143,17 @@ class BajajApi(
         val data: JsonElement? = null,
     )
 
+    @Serializable
+    private data class VehiclesResponse(
+        val message: String? = null,
+        val data: VehiclesData? = null,
+    )
+
+    @Serializable
+    private data class VehiclesData(
+        val data: List<Bike> = emptyList(),
+    )
+
     companion object {
         /** `string/ZERSYS_URL` in the official APK. */
         const val BASE_URL = "https://fms.bajajauto.com"
@@ -170,6 +192,16 @@ sealed interface LoginOutcome {
     /** Any other server message, e.g. an access code the dealer revoked. */
     data class Rejected(val message: String) : LoginOutcome
 }
+
+/** A motorcycle linked to the account. Field names mirror the server JSON. */
+@Serializable
+data class Bike(
+    @SerialName("ChassisNo") val chassisNumber: String? = null,
+    val model: String? = null,
+    @SerialName("model_image") val modelImage: String? = null,
+    val path: String? = null,
+    val nickname: String? = null,
+)
 
 open class BajajApiException(
     message: String,

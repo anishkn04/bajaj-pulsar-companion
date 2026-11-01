@@ -125,6 +125,27 @@ class BajajApiTest {
     }
 
     @Test
+    fun `vehicles reads the nested bike list and picks out the model`() = runTest {
+        server.enqueue(
+            json(
+                """{"message":"Success","data":{"data":[
+                   {"ChassisNo":"MD2ABCDEFGH123456","model":"PULSAR 150 N DISC ES"}
+                ]}}""",
+            ),
+        )
+
+        val bikes = api().vehicles(appToken = "app-token")
+
+        val request = server.takeRequest()
+        assertEquals("GET", request.method)
+        assertEquals("/api/ib/rc/customer/vehicles", request.path)
+        assertEquals("Bearer app-token", request.getHeader("Authorization"))
+        assertEquals(1, bikes.size)
+        assertEquals("PULSAR 150 N DISC ES", bikes.single().model)
+        assertEquals("MD2ABCDEFGH123456", bikes.single().chassisNumber)
+    }
+
+    @Test
     fun `a 401 becomes an unauthorized error so the caller can refresh`() = runTest {
         server.enqueue(
             MockResponse()
