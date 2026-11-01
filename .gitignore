@@ -1,0 +1,41 @@
+# --- Build output ---
+.gradle/
+build/
+**/build/
+*.apk
+*.aab
+*.ap_
+*.dex
+.kotlin/
+
+# --- Secrets: never commit ---
+.secrets/
+.env
+.env.*
+!.env.example
+local.properties
+*.jks
+*.keystore
+*.p12
+*.pem
+
+# --- Capture artifacts (contain VIN, tokens, coordinates) ---
+captures/
+*.har
+*.pcap
+*.pcapng
+*.btsnoop
+*.hci
+*.log
+fixtures/raw/
+testdata/raw/
+
+# --- IDE / OS ---
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# --- Tooling ---
+node_modules/
+.sentryclirc

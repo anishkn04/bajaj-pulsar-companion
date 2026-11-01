@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+#
+# Enforces Conventional Commits 1.0.0 on the subject line.
+# Install with: git config core.hooksPath .githooks
+
+set -euo pipefail
+
+msg_file="${1:?commit message file required}"
+subject="$(head -n1 "$msg_file")"
+
+# Merge commits and reverts are allowed to bypass the format check.
+if [[ "$subject" =~ ^(Merge|Revert) ]]; then
+  exit 0
+fi
+
+pattern='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9._/-]+\))?!?: .{1,72}$'
+
+if [[ ! "$subject" =~ $pattern ]]; then
+  cat >&2 <<EOF
+✖ Commit message does not follow Conventional Commits.
+
+  expected: type(scope): summary
+  got:      $subject
+
+  types: feat fix docs style refactor perf test build ci chore revert
+  example: test(session): require session to survive process death
+EOF
+  exit 1
+fi
