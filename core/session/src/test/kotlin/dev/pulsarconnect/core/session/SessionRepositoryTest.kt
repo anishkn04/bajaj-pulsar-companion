@@ -18,7 +18,7 @@ class SessionRepositoryTest {
 
     private val session = Session(
         accessToken = "access-token-1",
-        refreshToken = "refresh-token-1",
+        userToken = "user-token-1",
         issuedAt = Instant.parse("2026-11-01T10:00:00Z"),
         expiresAt = Instant.parse("2026-11-01T11:00:00Z"),
     )

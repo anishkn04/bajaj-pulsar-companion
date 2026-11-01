@@ -41,7 +41,7 @@ class SessionRepository(
         val vin: String,
         val accessCode: String,
         val accessToken: String,
-        val refreshToken: String? = null,
+        val userToken: String? = null,
         val issuedAt: String,
         val expiresAt: String? = null,
     ) {
@@ -52,7 +52,7 @@ class SessionRepository(
             ),
             session = Session(
                 accessToken = accessToken,
-                refreshToken = refreshToken,
+                userToken = userToken,
                 issuedAt = Instant.parse(issuedAt),
                 expiresAt = expiresAt?.let(Instant::parse),
             ),
@@ -63,7 +63,7 @@ class SessionRepository(
                 vin = stored.credentials.vin.value,
                 accessCode = stored.credentials.accessCode,
                 accessToken = stored.session.accessToken,
-                refreshToken = stored.session.refreshToken,
+                userToken = stored.session.userToken,
                 issuedAt = stored.session.issuedAt.toString(),
                 expiresAt = stored.session.expiresAt?.toString(),
             )
