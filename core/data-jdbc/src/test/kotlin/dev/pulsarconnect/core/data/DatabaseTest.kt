@@ -4,6 +4,7 @@ import dev.pulsarconnect.core.model.BikeProfile
 import dev.pulsarconnect.core.model.ServiceReminder
 import dev.pulsarconnect.core.model.TelemetryPoint
 import dev.pulsarconnect.core.model.Trip
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
@@ -16,19 +17,22 @@ import org.junit.jupiter.api.Test
 class DatabaseTest {
 
     private lateinit var db: Database
+    private lateinit var tempFile: java.io.File
 
     @BeforeEach
-    fun setUp() {
-        // Use a temp file instead of :memory: because SQLite in-memory DBs
-        // are destroyed when the connection closes, and each operation gets a new connection
-        val tempFile = java.io.File.createTempFile("test_", ".db")
-        tempFile.deleteOnExit()
+    fun setUp() = runBlocking {
+        tempFile = java.io.File.createTempFile("test_", ".db")
         db = Database.create(tempFile.absolutePath)
+        // Trip and reminder fixtures must reference persisted bikes.
+        for (vin in listOf("MD2ABCDEFGH123456", "VIN")) {
+            db.upsertBike(BikeProfile(vin, null, null, null, null))
+        }
     }
 
     @AfterEach
     fun tearDown() {
-        // in-memory DB auto-cleans
+        db.close()
+        tempFile.delete()
     }
 
     @Test

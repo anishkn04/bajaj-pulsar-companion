@@ -11,7 +11,12 @@ import org.sqlite.SQLiteDataSource
 
 class Database private constructor(
     private val dataSource: SQLiteDataSource,
-) {
+    private val keepAlive: java.sql.Connection? = null,
+) : AutoCloseable {
+    override fun close() {
+        keepAlive?.close()
+    }
+
     val connection: java.sql.Connection
         get() = dataSource.connection
 
@@ -24,10 +29,23 @@ class Database private constructor(
                 setJournalMode(SQLiteConfig.JournalMode.WAL)
                 setSynchronous(SQLiteConfig.SynchronousMode.NORMAL)
                 busyTimeout = 5000
-                // foreignKeys enabled via pragma in connection
+                enforceForeignKeys(true)
             }
-            val ds = SQLiteDataSource(config).apply { url = "jdbc:sqlite:$path" }
-            return Database(ds).apply { initSchema() }
+            // A named shared-memory database needs an anchor connection to outlive operation connections.
+            val url = if (path == ":memory:") {
+                "jdbc:sqlite:file:${java.util.UUID.randomUUID()}?mode=memory&cache=shared"
+            } else {
+                "jdbc:sqlite:$path"
+            }
+            val ds = SQLiteDataSource(config).apply { this.url = url }
+            val db = Database(ds, if (path == ":memory:") ds.connection else null)
+            try {
+                db.initSchema()
+                return db
+            } catch (failure: Exception) {
+                db.close()
+                throw failure
+            }
         }
     }
 
@@ -121,11 +139,11 @@ class Database private constructor(
                     last_synced_at_millis = excluded.last_synced_at_millis
             """.trimIndent())
             stmt.setString(1, profile.vin)
-            stmt.setString(2, profile.model.orEmpty())
-            stmt.setString(3, profile.modelImageUrl.orEmpty())
-            stmt.setString(4, profile.nickname.orEmpty())
-            stmt.setLong(5, profile.purchaseDateMillis ?: 0)
-            stmt.setLong(6, profile.lastSyncedAtMillis ?: 0)
+            stmt.setString(2, profile.model)
+            stmt.setString(3, profile.modelImageUrl)
+            stmt.setString(4, profile.nickname)
+            stmt.setObject(5, profile.purchaseDateMillis)
+            stmt.setObject(6, profile.lastSyncedAtMillis)
             stmt.executeUpdate()
             conn.commit()
             1L
@@ -144,11 +162,11 @@ class Database private constructor(
 
     private fun mapBike(rs: java.sql.ResultSet): BikeProfile = BikeProfile(
         vin = rs.getString("vin"),
-        model = rs.getString("model").takeIf { it.isNotBlank() },
-        modelImageUrl = rs.getString("model_image_url").takeIf { it.isNotBlank() },
-        nickname = rs.getString("nickname").takeIf { it.isNotBlank() },
-        purchaseDateMillis = rs.getLong("purchase_date_millis").takeIf { it > 0 },
-        lastSyncedAtMillis = rs.getLong("last_synced_at_millis").takeIf { it > 0 },
+        model = rs.getString("model"),
+        modelImageUrl = rs.getString("model_image_url"),
+        nickname = rs.getString("nickname"),
+        purchaseDateMillis = rs.getNullableLong("purchase_date_millis"),
+        lastSyncedAtMillis = rs.getNullableLong("last_synced_at_millis"),
     )
 
     // --- Trip ---
@@ -162,17 +180,17 @@ class Database private constructor(
             """.trimIndent(), java.sql.Statement.RETURN_GENERATED_KEYS)
             stmt.setString(1, trip.vin)
             stmt.setLong(2, trip.startTime)
-            stmt.setLong(3, trip.endTime ?: 0)
+            stmt.setObject(3, trip.endTime)
             stmt.setDouble(4, trip.startOdometer)
-            stmt.setDouble(5, trip.endOdometer ?: 0.0)
-            stmt.setDouble(6, trip.distanceKm ?: 0.0)
-            stmt.setDouble(7, trip.avgSpeedKmph ?: 0.0)
-            stmt.setDouble(8, trip.maxSpeedKmph ?: 0.0)
-            stmt.setDouble(9, trip.fuelUsedLiters ?: 0.0)
-            stmt.setDouble(10, trip.startLat ?: 0.0)
-            stmt.setDouble(11, trip.startLon ?: 0.0)
-            stmt.setDouble(12, trip.endLat ?: 0.0)
-            stmt.setDouble(13, trip.endLon ?: 0.0)
+            stmt.setObject(5, trip.endOdometer)
+            stmt.setObject(6, trip.distanceKm)
+            stmt.setObject(7, trip.avgSpeedKmph)
+            stmt.setObject(8, trip.maxSpeedKmph)
+            stmt.setObject(9, trip.fuelUsedLiters)
+            stmt.setObject(10, trip.startLat)
+            stmt.setObject(11, trip.startLon)
+            stmt.setObject(12, trip.endLat)
+            stmt.setObject(13, trip.endLon)
             stmt.setInt(14, if (trip.synced) 1 else 0)
             stmt.executeUpdate()
             val keys = stmt.generatedKeys
@@ -182,26 +200,31 @@ class Database private constructor(
         }
     }
 
-    suspend fun updateTrip(trip: Trip) = withContext(Dispatchers.IO) {
+    suspend fun updateTrip(trip: Trip) = updateTrip(trip, requireActive = false)
+
+    internal suspend fun finishTrip(trip: Trip) = updateTrip(trip, requireActive = true)
+
+    private suspend fun updateTrip(trip: Trip, requireActive: Boolean) = withContext(Dispatchers.IO) {
         require(trip.id != null) { "Trip must have an ID" }
         dataSource.connection.use { conn ->
             conn.setAutoCommit(false)
             val stmt = conn.prepareStatement("""
                 UPDATE trip SET end_time = ?, end_odometer = ?, distance_km = ?, avg_speed_kmph = ?,
                                 max_speed_kmph = ?, fuel_used_liters = ?, end_lat = ?, end_lon = ?, synced = ?
-                WHERE id = ?
+                WHERE id = ? ${if (requireActive) "AND end_time IS NULL" else ""}
             """.trimIndent())
-            stmt.setLong(1, trip.endTime ?: 0)
-            stmt.setDouble(2, trip.endOdometer ?: 0.0)
-            stmt.setDouble(3, trip.distanceKm ?: 0.0)
-            stmt.setDouble(4, trip.avgSpeedKmph ?: 0.0)
-            stmt.setDouble(5, trip.maxSpeedKmph ?: 0.0)
-            stmt.setDouble(6, trip.fuelUsedLiters ?: 0.0)
-            stmt.setDouble(7, trip.endLat ?: 0.0)
-            stmt.setDouble(8, trip.endLon ?: 0.0)
+            stmt.setObject(1, trip.endTime)
+            stmt.setObject(2, trip.endOdometer)
+            stmt.setObject(3, trip.distanceKm)
+            stmt.setObject(4, trip.avgSpeedKmph)
+            stmt.setObject(5, trip.maxSpeedKmph)
+            stmt.setObject(6, trip.fuelUsedLiters)
+            stmt.setObject(7, trip.endLat)
+            stmt.setObject(8, trip.endLon)
             stmt.setInt(9, if (trip.synced) 1 else 0)
             stmt.setLong(10, trip.id!!)
-            stmt.executeUpdate()
+            val updated = stmt.executeUpdate()
+            require(!requireActive || updated == 1) { "Trip must exist and be active to end it" }
             conn.commit()
         }
     }
@@ -216,9 +239,20 @@ class Database private constructor(
         }
     }
 
+    suspend fun getActiveTrip(vin: String): Trip? = withContext(Dispatchers.IO) {
+        dataSource.connection.use { conn ->
+            conn.prepareStatement("SELECT * FROM trip WHERE vin = ? AND end_time IS NULL LIMIT 1").use { stmt ->
+                stmt.setString(1, vin)
+                stmt.executeQuery().use { rs ->
+                    if (rs.next()) mapTrip(rs) else null
+                }
+            }
+        }
+    }
+
     suspend fun getTripsForVin(vin: String, limit: Int = 100, offset: Int = 0): List<Trip> = withContext(Dispatchers.IO) {
         dataSource.connection.use { conn ->
-            val stmt = conn.prepareStatement("SELECT * FROM trip WHERE vin = ? ORDER BY start_time DESC LIMIT ? OFFSET ?")
+            val stmt = conn.prepareStatement("SELECT * FROM trip WHERE vin = ? ORDER BY start_time DESC, id DESC LIMIT ? OFFSET ?")
             stmt.setString(1, vin)
             stmt.setInt(2, limit)
             stmt.setInt(3, offset)
@@ -234,17 +268,17 @@ class Database private constructor(
         id = rs.getLong("id"),
         vin = rs.getString("vin"),
         startTime = rs.getLong("start_time"),
-        endTime = rs.getLong("end_time").takeIf { it > 0 },
+        endTime = rs.getNullableLong("end_time"),
         startOdometer = rs.getDouble("start_odometer"),
-        endOdometer = rs.getDouble("end_odometer").takeIf { it > 0 },
-        distanceKm = rs.getDouble("distance_km").takeIf { it > 0 },
-        avgSpeedKmph = rs.getDouble("avg_speed_kmph").takeIf { it > 0 },
-        maxSpeedKmph = rs.getDouble("max_speed_kmph").takeIf { it > 0 },
-        fuelUsedLiters = rs.getDouble("fuel_used_liters").takeIf { it > 0 },
-        startLat = rs.getDouble("start_lat").takeIf { it != 0.0 },
-        startLon = rs.getDouble("start_lon").takeIf { it != 0.0 },
-        endLat = rs.getDouble("end_lat").takeIf { it != 0.0 },
-        endLon = rs.getDouble("end_lon").takeIf { it != 0.0 },
+        endOdometer = rs.getNullableDouble("end_odometer"),
+        distanceKm = rs.getNullableDouble("distance_km"),
+        avgSpeedKmph = rs.getNullableDouble("avg_speed_kmph"),
+        maxSpeedKmph = rs.getNullableDouble("max_speed_kmph"),
+        fuelUsedLiters = rs.getNullableDouble("fuel_used_liters"),
+        startLat = rs.getNullableDouble("start_lat"),
+        startLon = rs.getNullableDouble("start_lon"),
+        endLat = rs.getNullableDouble("end_lat"),
+        endLon = rs.getNullableDouble("end_lon"),
         synced = rs.getInt("synced") == 1,
     )
 
@@ -259,12 +293,12 @@ class Database private constructor(
             """.trimIndent(), java.sql.Statement.RETURN_GENERATED_KEYS)
             stmt.setLong(1, point.tripId)
             stmt.setLong(2, point.timestamp)
-            stmt.setDouble(3, point.speedKmph ?: 0.0)
-            stmt.setInt(4, point.rpm ?: 0)
-            stmt.setInt(5, point.fuelLevelPercent ?: 0)
-            stmt.setInt(6, point.engineTempC ?: 0)
-            stmt.setDouble(7, point.lat ?: 0.0)
-            stmt.setDouble(8, point.lon ?: 0.0)
+            stmt.setObject(3, point.speedKmph)
+            stmt.setObject(4, point.rpm)
+            stmt.setObject(5, point.fuelLevelPercent)
+            stmt.setObject(6, point.engineTempC)
+            stmt.setObject(7, point.lat)
+            stmt.setObject(8, point.lon)
             stmt.setInt(9, if (point.synced) 1 else 0)
             stmt.executeUpdate()
             val keys = stmt.generatedKeys
@@ -290,12 +324,12 @@ class Database private constructor(
         id = rs.getLong("id"),
         tripId = rs.getLong("trip_id"),
         timestamp = rs.getLong("timestamp"),
-        speedKmph = rs.getDouble("speed_kmph").takeIf { it > 0 },
-        rpm = rs.getInt("rpm").takeIf { it > 0 },
-        fuelLevelPercent = rs.getInt("fuel_level_percent").takeIf { it > 0 },
-        engineTempC = rs.getInt("engine_temp_c").takeIf { it > 0 },
-        lat = rs.getDouble("lat").takeIf { it != 0.0 },
-        lon = rs.getDouble("lon").takeIf { it != 0.0 },
+        speedKmph = rs.getNullableDouble("speed_kmph"),
+        rpm = rs.getNullableInt("rpm"),
+        fuelLevelPercent = rs.getNullableInt("fuel_level_percent"),
+        engineTempC = rs.getNullableInt("engine_temp_c"),
+        lat = rs.getNullableDouble("lat"),
+        lon = rs.getNullableDouble("lon"),
         synced = rs.getInt("synced") == 1,
     )
 
@@ -310,11 +344,11 @@ class Database private constructor(
             """.trimIndent(), java.sql.Statement.RETURN_GENERATED_KEYS)
             stmt.setString(1, reminder.vin)
             stmt.setString(2, reminder.title)
-            stmt.setString(3, reminder.description.orEmpty())
-            stmt.setDouble(4, reminder.dueOdometerKm ?: 0.0)
-            stmt.setLong(5, reminder.dueDateMillis ?: 0)
+            stmt.setString(3, reminder.description)
+            stmt.setObject(4, reminder.dueOdometerKm)
+            stmt.setObject(5, reminder.dueDateMillis)
             stmt.setInt(6, if (reminder.completed) 1 else 0)
-            stmt.setLong(7, reminder.completedAtMillis ?: 0)
+            stmt.setObject(7, reminder.completedAtMillis)
             stmt.setLong(8, reminder.createdAtMillis)
             stmt.executeUpdate()
             val keys = stmt.generatedKeys
@@ -344,7 +378,7 @@ class Database private constructor(
                 UPDATE service_reminder SET completed = ?, completed_at_millis = ? WHERE id = ?
             """.trimIndent())
             stmt.setInt(1, if (reminder.completed) 1 else 0)
-            stmt.setLong(2, reminder.completedAtMillis ?: 0)
+            stmt.setObject(2, reminder.completedAtMillis)
             stmt.setLong(3, reminder.id!!)
             stmt.executeUpdate()
             conn.commit()
@@ -355,11 +389,20 @@ class Database private constructor(
         id = rs.getLong("id"),
         vin = rs.getString("vin"),
         title = rs.getString("title"),
-        description = rs.getString("description").takeIf { it.isNotBlank() },
-        dueOdometerKm = rs.getDouble("due_odometer_km").takeIf { it > 0 },
-        dueDateMillis = rs.getLong("due_date_millis").takeIf { it > 0 },
+        description = rs.getString("description"),
+        dueOdometerKm = rs.getNullableDouble("due_odometer_km"),
+        dueDateMillis = rs.getNullableLong("due_date_millis"),
         completed = rs.getInt("completed") == 1,
-        completedAtMillis = rs.getLong("completed_at_millis").takeIf { it > 0 },
+        completedAtMillis = rs.getNullableLong("completed_at_millis"),
         createdAtMillis = rs.getLong("created_at_millis"),
     )
 }
+
+private fun java.sql.ResultSet.getNullableLong(column: String): Long? =
+    getLong(column).let { if (wasNull()) null else it }
+
+private fun java.sql.ResultSet.getNullableDouble(column: String): Double? =
+    getDouble(column).let { if (wasNull()) null else it }
+
+private fun java.sql.ResultSet.getNullableInt(column: String): Int? =
+    getInt(column).let { if (wasNull()) null else it }

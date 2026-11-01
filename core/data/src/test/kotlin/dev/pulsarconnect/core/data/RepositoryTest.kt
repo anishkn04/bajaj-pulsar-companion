@@ -13,7 +13,8 @@ import org.junit.jupiter.api.Test
 
 class RepositoryTest {
 
-    private val tripRepo = InMemoryTripRepository()
+    private var now = 1_000_000L
+    private val tripRepo = InMemoryTripRepository(clock = { now })
     private val reminderRepo = InMemoryReminderRepository()
     private val bikeRepo = InMemoryBikeRepository()
 
@@ -28,7 +29,7 @@ class RepositoryTest {
         // Add some telemetry
         tripRepo.addTelemetry(trip.id!!, TelemetryPoint(
             tripId = trip.id!!,
-            timestamp = System.currentTimeMillis(),
+            timestamp = now,
             speedKmph = 40.0,
             rpm = 3000,
             fuelLevelPercent = 80,
@@ -39,7 +40,7 @@ class RepositoryTest {
         ))
         tripRepo.addTelemetry(trip.id!!, TelemetryPoint(
             tripId = trip.id!!,
-            timestamp = System.currentTimeMillis() + 1000,
+            timestamp = now + 1000,
             speedKmph = 50.0,
             rpm = 3500,
             fuelLevelPercent = 79,
@@ -52,14 +53,13 @@ class RepositoryTest {
         val telemetry = tripRepo.getTelemetry(trip.id!!)
         assertEquals(2, telemetry.size)
 
-        // End trip - use a delay to ensure time difference
-        Thread.sleep(10)
+        now += 3_600_000
         val ended = tripRepo.endTrip(trip, 1015.5, 12.9720, 77.5950)
 
         assertEquals(1015.5, ended.endOdometer)
         assertEquals(15.5, ended.distanceKm)
         assertNotNull(ended.endTime)
-        assertTrue(ended.avgSpeedKmph!! >= 0) // Allow 0 for very fast tests
+        assertEquals(15.5, ended.avgSpeedKmph)
 
         // Fetch back
         val fetched = tripRepo.getTrip(ended.id!!)
@@ -86,7 +86,7 @@ class RepositoryTest {
 
     @Test
     fun `reminder creation and due filtering`() = runTest {
-        val now = System.currentTimeMillis()
+        val now = this@RepositoryTest.now
         val reminder = ServiceReminder(
             vin = "MD2ABCDEFGH123456",
             title = "Oil Change",
@@ -106,7 +106,7 @@ class RepositoryTest {
         assertEquals("Oil Change", due.first().title)
 
         // Complete it
-        reminderRepo.completeReminder(created.id!!, System.currentTimeMillis())
+        reminderRepo.completeReminder(created.id!!, now)
 
         val dueAfterComplete = reminderRepo.getDueReminders("MD2ABCDEFGH123456", 5500.0, now + 100_000_000)
         assertTrue(dueAfterComplete.isEmpty())
@@ -116,9 +116,9 @@ class RepositoryTest {
     fun `multiple trips for same vin ordered by time desc`() = runTest {
         val vin = "MD2ABCDEFGH123456"
         val t1 = tripRepo.startTrip(vin, 1000.0, null, null)
-        Thread.sleep(5)
+        now++
         val t2 = tripRepo.startTrip(vin, 2000.0, null, null)
-        Thread.sleep(5)
+        now++
         val t3 = tripRepo.startTrip(vin, 3000.0, null, null)
 
         tripRepo.endTrip(t1, 1010.0, null, null)

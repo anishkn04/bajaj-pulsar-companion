@@ -21,7 +21,7 @@ data class Trip(
     val synced: Boolean = false,
 ) {
     val durationSeconds: Long
-        get() = if (endTime != null) endTime!! - startTime else 0
+        get() = endTime?.let { ((it - startTime) / 1_000).coerceAtLeast(0) } ?: 0
 }
 
 @Serializable
