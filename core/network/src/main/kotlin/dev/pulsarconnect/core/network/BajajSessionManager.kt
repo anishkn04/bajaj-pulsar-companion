@@ -43,16 +43,17 @@ class BajajSessionManager(
 
         return when (val outcome = api.logIn(credentials, appToken)) {
             is LoginOutcome.Success -> {
-                val stored = StoredSession(
-                    credentials = credentials,
-                    session = Session(
-                        accessToken = appToken,
-                        userToken = outcome.userToken,
-                        issuedAt = clock.instant(),
+                persist(
+                    StoredSession(
+                        credentials = credentials,
+                        session = Session(
+                            accessToken = appToken,
+                            userToken = outcome.userToken,
+                            issuedAt = clock.instant(),
+                        ),
                     ),
                 )
-                persist(stored)
-                SignInResult.Success(stored)
+                SignInResult.Success(current!!)
             }
 
             LoginOutcome.VehicleNotRegistered -> SignInResult.VehicleNotRegistered
@@ -61,16 +62,23 @@ class BajajSessionManager(
         }
     }
 
-    /**
-     * Runs [block] with a valid session, refreshing the app token once if the
-     * server rejects it. Concurrent rejections share one refresh.
-     */
     suspend fun <T> withSession(block: suspend (StoredSession) -> T): T {
         val session = requireSession()
-        return try {
-            block(session)
+
+        try {
+            return block(session)
         } catch (_: UnauthorizedException) {
-            block(refreshAppToken(session.session.accessToken))
+            // First try: refresh the app token
+            val afterAppRefresh = refreshAppToken(session.session.accessToken)
+            try {
+                return block(afterAppRefresh)
+            } catch (_: UnauthorizedException) {
+                // Second try: if the app token refresh didn't help, the user token is stale
+                // Re-authenticate with the credentials to get a fresh user token
+                val reauthenticated = signIn(session.credentials)
+                require(reauthenticated is SignInResult.Success)
+                return block(reauthenticated.session)
+            }
         }
     }
 
@@ -93,15 +101,30 @@ class BajajSessionManager(
             }
 
             val freshToken = api.whoAmI()
-            val refreshed = session.copy(
-                session = session.session.copy(
-                    accessToken = freshToken,
-                    issuedAt = clock.instant(),
+            persist(
+                session.copy(
+                    session = session.session.copy(
+                        accessToken = freshToken,
+                        issuedAt = clock.instant(),
+                    ),
                 ),
             )
-            persist(refreshed)
-            refreshed
+            current!!
         }
+
+    private suspend fun reauthenticate(staleUserToken: String?): StoredSession {
+        requireSession() // ensure we have credentials
+        return refreshMutex.withLock {
+            // Another caller may have reauthenticated while this one waited.
+            if (current?.session?.userToken == staleUserToken) {
+                return current!!
+            }
+
+            val result = signIn(current!!.credentials)
+            require(result is SignInResult.Success)
+            result.session
+        }
+    }
 
     private suspend fun persist(stored: StoredSession) = stateMutex.withLock {
         repository.save(stored)

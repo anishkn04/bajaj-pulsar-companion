@@ -22,11 +22,13 @@ import okhttp3.RequestBody.Companion.toRequestBody
  * Every method here is a single request; retries and token refresh live in
  * [BajajSessionManager] so the transport stays easy to test.
  */
-class BajajApi(
-    baseUrl: String = BASE_URL,
-    private val client: OkHttpClient = defaultClient,
-    private val json: Json = defaultJson,
+class BajajApi internal constructor(
+    baseUrl: String,
+    private val client: OkHttpClient,
+    private val json: Json,
 ) {
+
+    constructor(baseUrl: String = BASE_URL) : this(baseUrl, defaultClient, defaultJson)
 
     private val baseUrl = baseUrl.trimEnd('/')
 
@@ -63,11 +65,16 @@ class BajajApi(
         return payload.message == SUCCESS
     }
 
-    /** `GET /api/ib/rc/customer/vehicles` — the bikes linked to this account. */
-    suspend fun vehicles(appToken: String): List<Bike> {
+    /**
+     * `GET /api/ib/rc/customer/vehicles` — the bikes linked to this account.
+     *
+     * Unlike every other endpoint, the official client authorises this one
+     * with the login token (`userToken`), not the whoami app token.
+     */
+    suspend fun vehicles(userToken: String): List<Bike> {
         val request = Request.Builder()
             .url("$baseUrl/api/ib/rc/customer/vehicles")
-            .header("Authorization", "Bearer $appToken")
+            .header("Authorization", "Bearer $userToken")
             .get()
             .build()
 

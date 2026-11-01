@@ -162,6 +162,62 @@ class BajajSessionManagerTest {
         assertEquals(1, whoAmICalls.get(), "token refresh must be single-flight")
     }
 
+    @Test
+    fun `a rejected user token is repaired by signing in again`() = runTest {
+        val logins = AtomicInteger()
+
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val path = request.path.orEmpty()
+                val authorization = request.getHeader("Authorization")
+                return when {
+                    path.startsWith("/api/whoami") ->
+                        json("""{"message":"Success","token":"app-token"}""")
+
+                    path == "/api/ib/rc/login" -> {
+                        logins.incrementAndGet()
+                        json(
+                            """{"message":"Success","token":"fresh-user-token","data":{}}""",
+                        )
+                    }
+
+                    path == "/api/ib/rc/customer/vehicles" &&
+                        authorization == "Bearer fresh-user-token" ->
+                        json(
+                            """{"message":"Success","data":{"data":[
+                               {"ChassisNo":"MD2ABCDEFGH123456","model":"PULSAR 150 N DISC ES"}
+                            ]}}""",
+                        )
+
+                    else -> MockResponse()
+                        .setResponseCode(401)
+                        .setBody("""{"message":"Session Expired"}""")
+                }
+            }
+        }
+
+        val secrets = MapSecretStore()
+        SessionRepository(secrets).save(
+            StoredSession(
+                credentials = credentials,
+                session = Session(
+                    accessToken = "app-token",
+                    userToken = "stale-user-token",
+                    issuedAt = now,
+                ),
+            ),
+        )
+        val manager = BajajSessionManager(api(), SessionRepository(secrets), clock)
+
+        val bikes = manager.withSession { session ->
+            api().vehicles(session.session.userToken!!)
+        }
+
+        assertEquals("PULSAR 150 N DISC ES", bikes.single().model)
+        assertEquals(1, logins.get(), "a rejected user token must be repaired once")
+        assertEquals("fresh-user-token", SessionRepository(secrets).load()?.session?.userToken)
+    }
+
     private class MapSecretStore(initial: Map<String, String> = emptyMap()) : SecretStore {
         private val values = initial.toMutableMap()
 

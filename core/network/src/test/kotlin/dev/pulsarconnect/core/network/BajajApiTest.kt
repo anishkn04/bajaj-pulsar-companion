@@ -134,12 +134,14 @@ class BajajApiTest {
             ),
         )
 
-        val bikes = api().vehicles(appToken = "app-token")
+        val bikes = api().vehicles(userToken = "user-token")
 
         val request = server.takeRequest()
         assertEquals("GET", request.method)
         assertEquals("/api/ib/rc/customer/vehicles", request.path)
-        assertEquals("Bearer app-token", request.getHeader("Authorization"))
+        // The official handler for this one endpoint sends the login token,
+        // not the app token, so the contract test pins that.
+        assertEquals("Bearer user-token", request.getHeader("Authorization"))
         assertEquals(1, bikes.size)
         assertEquals("PULSAR 150 N DISC ES", bikes.single().model)
         assertEquals("MD2ABCDEFGH123456", bikes.single().chassisNumber)
