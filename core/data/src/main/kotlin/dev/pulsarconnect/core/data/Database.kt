@@ -1,0 +1,365 @@
+package dev.pulsarconnect.core.data
+
+import dev.pulsarconnect.core.model.BikeProfile
+import dev.pulsarconnect.core.model.ServiceReminder
+import dev.pulsarconnect.core.model.TelemetryPoint
+import dev.pulsarconnect.core.model.Trip
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.sqlite.SQLiteConfig
+import org.sqlite.SQLiteDataSource
+
+class Database private constructor(
+    private val dataSource: SQLiteDataSource,
+) {
+    val connection: java.sql.Connection
+        get() = dataSource.connection
+
+    companion object {
+        const val DB_NAME = "pulsar_connect.db"
+        const val VERSION = 1
+
+        fun create(path: String): Database {
+            val config = SQLiteConfig().apply {
+                setJournalMode(SQLiteConfig.JournalMode.WAL)
+                setSynchronous(SQLiteConfig.SynchronousMode.NORMAL)
+                busyTimeout = 5000
+                // foreignKeys enabled via pragma in connection
+            }
+            val ds = SQLiteDataSource(config).apply { url = "jdbc:sqlite:$path" }
+            return Database(ds).apply { initSchema() }
+        }
+    }
+
+    private fun initSchema() {
+        dataSource.connection.use { conn ->
+            conn.setAutoCommit(false)
+            conn.createStatement().executeUpdate("""
+                CREATE TABLE IF NOT EXISTS bike_profile (
+                    vin TEXT PRIMARY KEY,
+                    model TEXT,
+                    model_image_url TEXT,
+                    nickname TEXT,
+                    purchase_date_millis INTEGER,
+                    last_synced_at_millis INTEGER
+                )
+            """.trimIndent())
+            conn.createStatement().executeUpdate("""
+                CREATE TABLE IF NOT EXISTS trip (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    vin TEXT NOT NULL,
+                    start_time INTEGER NOT NULL,
+                    end_time INTEGER,
+                    start_odometer REAL NOT NULL,
+                    end_odometer REAL,
+                    distance_km REAL,
+                    avg_speed_kmph REAL,
+                    max_speed_kmph REAL,
+                    fuel_used_liters REAL,
+                    start_lat REAL,
+                    start_lon REAL,
+                    end_lat REAL,
+                    end_lon REAL,
+                    synced INTEGER NOT NULL DEFAULT 0,
+                    FOREIGN KEY (vin) REFERENCES bike_profile(vin)
+                )
+            """.trimIndent())
+            conn.createStatement().executeUpdate("""
+                CREATE INDEX IF NOT EXISTS idx_trip_vin_time ON trip(vin, start_time DESC)
+            """.trimIndent())
+            conn.createStatement().executeUpdate("""
+                CREATE TABLE IF NOT EXISTS telemetry_point (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trip_id INTEGER NOT NULL,
+                    timestamp INTEGER NOT NULL,
+                    speed_kmph REAL,
+                    rpm INTEGER,
+                    fuel_level_percent INTEGER,
+                    engine_temp_c INTEGER,
+                    lat REAL,
+                    lon REAL,
+                    synced INTEGER NOT NULL DEFAULT 0,
+                    FOREIGN KEY (trip_id) REFERENCES trip(id) ON DELETE CASCADE
+                )
+            """.trimIndent())
+            conn.createStatement().executeUpdate("""
+                CREATE INDEX IF NOT EXISTS idx_telemetry_trip_time ON telemetry_point(trip_id, timestamp)
+            """.trimIndent())
+            conn.createStatement().executeUpdate("""
+                CREATE TABLE IF NOT EXISTS service_reminder (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    vin TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    description TEXT,
+                    due_odometer_km REAL,
+                    due_date_millis INTEGER,
+                    completed INTEGER NOT NULL DEFAULT 0,
+                    completed_at_millis INTEGER,
+                    created_at_millis INTEGER NOT NULL,
+                    FOREIGN KEY (vin) REFERENCES bike_profile(vin)
+                )
+            """.trimIndent())
+            conn.createStatement().executeUpdate("""
+                CREATE INDEX IF NOT EXISTS idx_reminder_vin_due ON service_reminder(vin, due_odometer_km, due_date_millis)
+            """.trimIndent())
+            conn.commit()
+        }
+    }
+
+    // --- BikeProfile ---
+    suspend fun upsertBike(profile: BikeProfile): Long = withContext(Dispatchers.IO) {
+        dataSource.connection.use { conn ->
+            conn.setAutoCommit(false)
+            val stmt = conn.prepareStatement("""
+                INSERT INTO bike_profile (vin, model, model_image_url, nickname, purchase_date_millis, last_synced_at_millis)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(vin) DO UPDATE SET
+                    model = excluded.model,
+                    model_image_url = excluded.model_image_url,
+                    nickname = excluded.nickname,
+                    purchase_date_millis = excluded.purchase_date_millis,
+                    last_synced_at_millis = excluded.last_synced_at_millis
+            """.trimIndent())
+            stmt.setString(1, profile.vin)
+            stmt.setString(2, profile.model.orEmpty())
+            stmt.setString(3, profile.modelImageUrl.orEmpty())
+            stmt.setString(4, profile.nickname.orEmpty())
+            stmt.setLong(5, profile.purchaseDateMillis ?: 0)
+            stmt.setLong(6, profile.lastSyncedAtMillis ?: 0)
+            stmt.executeUpdate()
+            conn.commit()
+            1L
+        }
+    }
+
+    suspend fun getBike(vin: String): BikeProfile? = withContext(Dispatchers.IO) {
+        dataSource.connection.use { conn ->
+            val stmt = conn.prepareStatement("SELECT * FROM bike_profile WHERE vin = ?")
+            stmt.setString(1, vin)
+            stmt.executeQuery().use { rs ->
+                if (rs.next()) mapBike(rs) else null
+            }
+        }
+    }
+
+    private fun mapBike(rs: java.sql.ResultSet): BikeProfile = BikeProfile(
+        vin = rs.getString("vin"),
+        model = rs.getString("model").takeIf { it.isNotBlank() },
+        modelImageUrl = rs.getString("model_image_url").takeIf { it.isNotBlank() },
+        nickname = rs.getString("nickname").takeIf { it.isNotBlank() },
+        purchaseDateMillis = rs.getLong("purchase_date_millis").takeIf { it > 0 },
+        lastSyncedAtMillis = rs.getLong("last_synced_at_millis").takeIf { it > 0 },
+    )
+
+    // --- Trip ---
+    suspend fun insertTrip(trip: Trip): Long = withContext(Dispatchers.IO) {
+        dataSource.connection.use { conn ->
+            conn.setAutoCommit(false)
+            val stmt = conn.prepareStatement("""
+                INSERT INTO trip (vin, start_time, end_time, start_odometer, end_odometer, distance_km, avg_speed_kmph,
+                                  max_speed_kmph, fuel_used_liters, start_lat, start_lon, end_lat, end_lon, synced)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """.trimIndent(), java.sql.Statement.RETURN_GENERATED_KEYS)
+            stmt.setString(1, trip.vin)
+            stmt.setLong(2, trip.startTime)
+            stmt.setLong(3, trip.endTime ?: 0)
+            stmt.setDouble(4, trip.startOdometer)
+            stmt.setDouble(5, trip.endOdometer ?: 0.0)
+            stmt.setDouble(6, trip.distanceKm ?: 0.0)
+            stmt.setDouble(7, trip.avgSpeedKmph ?: 0.0)
+            stmt.setDouble(8, trip.maxSpeedKmph ?: 0.0)
+            stmt.setDouble(9, trip.fuelUsedLiters ?: 0.0)
+            stmt.setDouble(10, trip.startLat ?: 0.0)
+            stmt.setDouble(11, trip.startLon ?: 0.0)
+            stmt.setDouble(12, trip.endLat ?: 0.0)
+            stmt.setDouble(13, trip.endLon ?: 0.0)
+            stmt.setInt(14, if (trip.synced) 1 else 0)
+            stmt.executeUpdate()
+            val keys = stmt.generatedKeys
+            val id = if (keys.next()) keys.getLong(1) else -1
+            conn.commit()
+            id
+        }
+    }
+
+    suspend fun updateTrip(trip: Trip) = withContext(Dispatchers.IO) {
+        require(trip.id != null) { "Trip must have an ID" }
+        dataSource.connection.use { conn ->
+            conn.setAutoCommit(false)
+            val stmt = conn.prepareStatement("""
+                UPDATE trip SET end_time = ?, end_odometer = ?, distance_km = ?, avg_speed_kmph = ?,
+                                max_speed_kmph = ?, fuel_used_liters = ?, end_lat = ?, end_lon = ?, synced = ?
+                WHERE id = ?
+            """.trimIndent())
+            stmt.setLong(1, trip.endTime ?: 0)
+            stmt.setDouble(2, trip.endOdometer ?: 0.0)
+            stmt.setDouble(3, trip.distanceKm ?: 0.0)
+            stmt.setDouble(4, trip.avgSpeedKmph ?: 0.0)
+            stmt.setDouble(5, trip.maxSpeedKmph ?: 0.0)
+            stmt.setDouble(6, trip.fuelUsedLiters ?: 0.0)
+            stmt.setDouble(7, trip.endLat ?: 0.0)
+            stmt.setDouble(8, trip.endLon ?: 0.0)
+            stmt.setInt(9, if (trip.synced) 1 else 0)
+            stmt.setLong(10, trip.id!!)
+            stmt.executeUpdate()
+            conn.commit()
+        }
+    }
+
+    suspend fun getTrip(id: Long): Trip? = withContext(Dispatchers.IO) {
+        dataSource.connection.use { conn ->
+            val stmt = conn.prepareStatement("SELECT * FROM trip WHERE id = ?")
+            stmt.setLong(1, id)
+            stmt.executeQuery().use { rs ->
+                if (rs.next()) mapTrip(rs) else null
+            }
+        }
+    }
+
+    suspend fun getTripsForVin(vin: String, limit: Int = 100, offset: Int = 0): List<Trip> = withContext(Dispatchers.IO) {
+        dataSource.connection.use { conn ->
+            val stmt = conn.prepareStatement("SELECT * FROM trip WHERE vin = ? ORDER BY start_time DESC LIMIT ? OFFSET ?")
+            stmt.setString(1, vin)
+            stmt.setInt(2, limit)
+            stmt.setInt(3, offset)
+            stmt.executeQuery().use { rs ->
+                val list = mutableListOf<Trip>()
+                while (rs.next()) list.add(mapTrip(rs))
+                list
+            }
+        }
+    }
+
+    private fun mapTrip(rs: java.sql.ResultSet): Trip = Trip(
+        id = rs.getLong("id"),
+        vin = rs.getString("vin"),
+        startTime = rs.getLong("start_time"),
+        endTime = rs.getLong("end_time").takeIf { it > 0 },
+        startOdometer = rs.getDouble("start_odometer"),
+        endOdometer = rs.getDouble("end_odometer").takeIf { it > 0 },
+        distanceKm = rs.getDouble("distance_km").takeIf { it > 0 },
+        avgSpeedKmph = rs.getDouble("avg_speed_kmph").takeIf { it > 0 },
+        maxSpeedKmph = rs.getDouble("max_speed_kmph").takeIf { it > 0 },
+        fuelUsedLiters = rs.getDouble("fuel_used_liters").takeIf { it > 0 },
+        startLat = rs.getDouble("start_lat").takeIf { it != 0.0 },
+        startLon = rs.getDouble("start_lon").takeIf { it != 0.0 },
+        endLat = rs.getDouble("end_lat").takeIf { it != 0.0 },
+        endLon = rs.getDouble("end_lon").takeIf { it != 0.0 },
+        synced = rs.getInt("synced") == 1,
+    )
+
+    // --- TelemetryPoint ---
+    suspend fun insertTelemetry(point: TelemetryPoint): Long = withContext(Dispatchers.IO) {
+        dataSource.connection.use { conn ->
+            conn.setAutoCommit(false)
+            val stmt = conn.prepareStatement("""
+                INSERT INTO telemetry_point (trip_id, timestamp, speed_kmph, rpm, fuel_level_percent,
+                                             engine_temp_c, lat, lon, synced)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """.trimIndent(), java.sql.Statement.RETURN_GENERATED_KEYS)
+            stmt.setLong(1, point.tripId)
+            stmt.setLong(2, point.timestamp)
+            stmt.setDouble(3, point.speedKmph ?: 0.0)
+            stmt.setInt(4, point.rpm ?: 0)
+            stmt.setInt(5, point.fuelLevelPercent ?: 0)
+            stmt.setInt(6, point.engineTempC ?: 0)
+            stmt.setDouble(7, point.lat ?: 0.0)
+            stmt.setDouble(8, point.lon ?: 0.0)
+            stmt.setInt(9, if (point.synced) 1 else 0)
+            stmt.executeUpdate()
+            val keys = stmt.generatedKeys
+            val id = if (keys.next()) keys.getLong(1) else -1
+            conn.commit()
+            id
+        }
+    }
+
+    suspend fun getTelemetryForTrip(tripId: Long): List<TelemetryPoint> = withContext(Dispatchers.IO) {
+        dataSource.connection.use { conn ->
+            val stmt = conn.prepareStatement("SELECT * FROM telemetry_point WHERE trip_id = ? ORDER BY timestamp")
+            stmt.setLong(1, tripId)
+            stmt.executeQuery().use { rs ->
+                val list = mutableListOf<TelemetryPoint>()
+                while (rs.next()) list.add(mapTelemetry(rs))
+                list
+            }
+        }
+    }
+
+    private fun mapTelemetry(rs: java.sql.ResultSet): TelemetryPoint = TelemetryPoint(
+        id = rs.getLong("id"),
+        tripId = rs.getLong("trip_id"),
+        timestamp = rs.getLong("timestamp"),
+        speedKmph = rs.getDouble("speed_kmph").takeIf { it > 0 },
+        rpm = rs.getInt("rpm").takeIf { it > 0 },
+        fuelLevelPercent = rs.getInt("fuel_level_percent").takeIf { it > 0 },
+        engineTempC = rs.getInt("engine_temp_c").takeIf { it > 0 },
+        lat = rs.getDouble("lat").takeIf { it != 0.0 },
+        lon = rs.getDouble("lon").takeIf { it != 0.0 },
+        synced = rs.getInt("synced") == 1,
+    )
+
+    // --- ServiceReminder ---
+    suspend fun insertReminder(reminder: ServiceReminder): Long = withContext(Dispatchers.IO) {
+        dataSource.connection.use { conn ->
+            conn.setAutoCommit(false)
+            val stmt = conn.prepareStatement("""
+                INSERT INTO service_reminder (vin, title, description, due_odometer_km, due_date_millis,
+                                              completed, completed_at_millis, created_at_millis)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """.trimIndent(), java.sql.Statement.RETURN_GENERATED_KEYS)
+            stmt.setString(1, reminder.vin)
+            stmt.setString(2, reminder.title)
+            stmt.setString(3, reminder.description.orEmpty())
+            stmt.setDouble(4, reminder.dueOdometerKm ?: 0.0)
+            stmt.setLong(5, reminder.dueDateMillis ?: 0)
+            stmt.setInt(6, if (reminder.completed) 1 else 0)
+            stmt.setLong(7, reminder.completedAtMillis ?: 0)
+            stmt.setLong(8, reminder.createdAtMillis)
+            stmt.executeUpdate()
+            val keys = stmt.generatedKeys
+            val id = if (keys.next()) keys.getLong(1) else -1
+            conn.commit()
+            id
+        }
+    }
+
+    suspend fun getRemindersForVin(vin: String): List<ServiceReminder> = withContext(Dispatchers.IO) {
+        dataSource.connection.use { conn ->
+            val stmt = conn.prepareStatement("SELECT * FROM service_reminder WHERE vin = ? ORDER BY due_date_millis, due_odometer_km")
+            stmt.setString(1, vin)
+            stmt.executeQuery().use { rs ->
+                val list = mutableListOf<ServiceReminder>()
+                while (rs.next()) list.add(mapReminder(rs))
+                list
+            }
+        }
+    }
+
+    suspend fun updateReminder(reminder: ServiceReminder) = withContext(Dispatchers.IO) {
+        require(reminder.id != null) { "Reminder must have an ID" }
+        dataSource.connection.use { conn ->
+            conn.setAutoCommit(false)
+            val stmt = conn.prepareStatement("""
+                UPDATE service_reminder SET completed = ?, completed_at_millis = ? WHERE id = ?
+            """.trimIndent())
+            stmt.setInt(1, if (reminder.completed) 1 else 0)
+            stmt.setLong(2, reminder.completedAtMillis ?: 0)
+            stmt.setLong(3, reminder.id!!)
+            stmt.executeUpdate()
+            conn.commit()
+        }
+    }
+
+    private fun mapReminder(rs: java.sql.ResultSet): ServiceReminder = ServiceReminder(
+        id = rs.getLong("id"),
+        vin = rs.getString("vin"),
+        title = rs.getString("title"),
+        description = rs.getString("description").takeIf { it.isNotBlank() },
+        dueOdometerKm = rs.getDouble("due_odometer_km").takeIf { it > 0 },
+        dueDateMillis = rs.getLong("due_date_millis").takeIf { it > 0 },
+        completed = rs.getInt("completed") == 1,
+        completedAtMillis = rs.getLong("completed_at_millis").takeIf { it > 0 },
+        createdAtMillis = rs.getLong("created_at_millis"),
+    )
+}

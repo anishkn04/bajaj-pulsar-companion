@@ -1,0 +1,134 @@
+package dev.pulsarconnect.core.data
+
+import dev.pulsarconnect.core.model.BikeProfile
+import dev.pulsarconnect.core.model.ServiceReminder
+import dev.pulsarconnect.core.model.TelemetryPoint
+import dev.pulsarconnect.core.model.Trip
+import kotlinx.coroutines.test.runTest
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+
+class RepositoryTest {
+
+    private val tripRepo = InMemoryTripRepository()
+    private val reminderRepo = InMemoryReminderRepository()
+    private val bikeRepo = InMemoryBikeRepository()
+
+    @Test
+    fun `trip lifecycle start add telemetry end`() = runTest {
+        val trip = tripRepo.startTrip("MD2ABCDEFGH123456", 1000.0, 12.9716, 77.5946)
+
+        assertNotNull(trip.id)
+        assertEquals(1000.0, trip.startOdometer)
+        assertNull(trip.endTime)
+
+        // Add some telemetry
+        tripRepo.addTelemetry(trip.id!!, TelemetryPoint(
+            tripId = trip.id!!,
+            timestamp = System.currentTimeMillis(),
+            speedKmph = 40.0,
+            rpm = 3000,
+            fuelLevelPercent = 80,
+            engineTempC = 90,
+            lat = 12.9716,
+            lon = 77.5946,
+            synced = false,
+        ))
+        tripRepo.addTelemetry(trip.id!!, TelemetryPoint(
+            tripId = trip.id!!,
+            timestamp = System.currentTimeMillis() + 1000,
+            speedKmph = 50.0,
+            rpm = 3500,
+            fuelLevelPercent = 79,
+            engineTempC = 92,
+            lat = 12.9720,
+            lon = 77.5950,
+            synced = false,
+        ))
+
+        val telemetry = tripRepo.getTelemetry(trip.id!!)
+        assertEquals(2, telemetry.size)
+
+        // End trip - use a delay to ensure time difference
+        Thread.sleep(10)
+        val ended = tripRepo.endTrip(trip, 1015.5, 12.9720, 77.5950)
+
+        assertEquals(1015.5, ended.endOdometer)
+        assertEquals(15.5, ended.distanceKm)
+        assertNotNull(ended.endTime)
+        assertTrue(ended.avgSpeedKmph!! >= 0) // Allow 0 for very fast tests
+
+        // Fetch back
+        val fetched = tripRepo.getTrip(ended.id!!)
+        assertEquals(ended.distanceKm, fetched?.distanceKm)
+    }
+
+    @Test
+    fun `bike profile upsert and fetch`() = runTest {
+        val profile = BikeProfile(
+            vin = "MD2ABCDEFGH123456",
+            model = "PULSAR 150 N DISC ES",
+            nickname = "My Pulsar",
+            modelImageUrl = null,
+            purchaseDateMillis = null,
+            lastSyncedAtMillis = null,
+        )
+
+        bikeRepo.upsertBike(profile)
+        val fetched = bikeRepo.getBike(profile.vin)
+
+        assertEquals("My Pulsar", fetched?.displayName)
+        assertEquals("PULSAR 150 N DISC ES", fetched?.model)
+    }
+
+    @Test
+    fun `reminder creation and due filtering`() = runTest {
+        val now = System.currentTimeMillis()
+        val reminder = ServiceReminder(
+            vin = "MD2ABCDEFGH123456",
+            title = "Oil Change",
+            description = null,
+            dueOdometerKm = 5000.0,
+            dueDateMillis = now + 86_400_000, // tomorrow
+            completed = false,
+            completedAtMillis = null,
+            createdAtMillis = now,
+        )
+
+        val created = reminderRepo.addReminder(reminder)
+        assertNotNull(created.id)
+
+        val due = reminderRepo.getDueReminders("MD2ABCDEFGH123456", 5500.0, now + 100_000_000)
+        assertEquals(1, due.size)
+        assertEquals("Oil Change", due.first().title)
+
+        // Complete it
+        reminderRepo.completeReminder(created.id!!, System.currentTimeMillis())
+
+        val dueAfterComplete = reminderRepo.getDueReminders("MD2ABCDEFGH123456", 5500.0, now + 100_000_000)
+        assertTrue(dueAfterComplete.isEmpty())
+    }
+
+    @Test
+    fun `multiple trips for same vin ordered by time desc`() = runTest {
+        val vin = "MD2ABCDEFGH123456"
+        val t1 = tripRepo.startTrip(vin, 1000.0, null, null)
+        Thread.sleep(5)
+        val t2 = tripRepo.startTrip(vin, 2000.0, null, null)
+        Thread.sleep(5)
+        val t3 = tripRepo.startTrip(vin, 3000.0, null, null)
+
+        tripRepo.endTrip(t1, 1010.0, null, null)
+        tripRepo.endTrip(t2, 2020.0, null, null)
+        tripRepo.endTrip(t3, 3030.0, null, null)
+
+        val trips = tripRepo.getTrips(vin, 10, 0)
+        assertEquals(3, trips.size)
+        assertEquals(t3.id, trips[0].id) // most recent first
+        assertEquals(t2.id, trips[1].id)
+        assertEquals(t1.id, trips[2].id)
+    }
+}
