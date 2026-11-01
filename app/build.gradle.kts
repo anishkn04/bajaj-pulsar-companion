@@ -39,6 +39,10 @@ android {
         compose = true
     }
 
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
+
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -64,11 +68,16 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
 
+    implementation(project(":core:data"))
     implementation(project(":core:model"))
     implementation(project(":core:session"))
     implementation(project(":core:network"))
 
     coreLibraryDesugaring(libs.android.desugar)
+
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.junit4)
+    testImplementation(libs.robolectric)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

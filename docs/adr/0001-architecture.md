@@ -18,8 +18,9 @@ Split the codebase into plain Kotlin/JVM modules and a thin Android app:
 ```
 core/model     domain types (VIN, credentials, session)
 core/session   session persistence behind a SecretStore port
-core/data      local database + offline-first repositories
-core/ble       GATT client + frame codec
+core/data      Android-safe repository contracts, shared rules and test doubles
+core/data-jdbc desktop/JVM SQLite adapter (not an Android app dependency)
+core/ble       GATT client + frame codec (planned)
 core/network   API client + auth orchestration
 app            Jetpack Compose UI, Android adapters
 ```
@@ -27,8 +28,13 @@ app            Jetpack Compose UI, Android adapters
 - `core/*` must not depend on the Android SDK. Android specifics sit behind
   ports (`SecretStore`, clock, dispatcher) and are implemented in `app`.
 - Tests in `core/*` run on the JVM with JUnit 5 and MockWebServer.
-- The `app` module wires real implementations (Keystore, Room, Bluetooth) and
-  holds UI.
+- The `app` module wires Android Keystore and native SQLiteOpenHelper adapters
+  and holds the Compose UI. Bluetooth is planned, not yet implemented.
+- Android tests use Robolectric on API 26 and 35 to verify actual SQLite
+  persistence across close/reopen. JDBC tests remain separate in `core/data-jdbc`.
+- SQLite JDBC is a desktop native driver, not an Android runtime dependency.
+  The Android adapter implements the same repository ports with framework
+  SQLite, keeping null values distinct from legitimate zero readings.
 
 ## Consequences
 

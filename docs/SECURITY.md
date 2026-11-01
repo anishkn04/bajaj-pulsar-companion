@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | VIN, access code | app-private storage | AES-GCM key in the Android Keystore |
 | App token, user token | app-private storage | same key |
-| Trips, telemetry | local database | app-private storage |
+| Bike profiles, trips, telemetry, reminders | native Android SQLite database | app-private storage; not separately encrypted |
 
 Nothing is uploaded to a server we control. There is no analytics, no crash
 reporting SDK and no account with us.
@@ -26,14 +26,21 @@ reporting SDK and no account with us.
 We defend against:
 
 - Another app on the device reading our files (app sandbox + Keystore).
-- A lost device being unlocked to read trips (Keystore-bound key, no backup of
-  secrets; `android:allowBackup="false"` for secret storage).
-- Accidental disclosure via logs, screenshots or commits (redaction helpers,
-  debug-only logging).
+- Ordinary Android app backup of credentials (`android:allowBackup="false"`).
+
+Credentials use Keystore-backed encryption, but the local SQLite database does
+not. There is no in-app lock: someone using an unlocked device can open the app
+and see its records. Screenshots are not blocked. Contributor redaction rules
+are a process safeguard, not an automatic disclosure-prevention mechanism.
+
+Signing out clears saved credentials/tokens, **not** bike profiles, trips or
+reminders. Records remain per VIN for the next sign-in. Clear Android app
+storage or uninstall to remove them. There is no export/restore workflow yet;
+users should retain another copy of important service records.
 
 We do **not** defend against:
 
-- A rooted device or a compromised OS.
+- A rooted device, a compromised OS, or someone using an unlocked device.
 - Bajaj changing their API (we will break; that is expected).
 - Someone who already has your VIN + access code. Those are the credentials.
 - Traffic analysis by your network operator. TLS is used; we do not add

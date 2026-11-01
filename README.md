@@ -1,125 +1,73 @@
 # Bajaj Pulsar Companion App
 
-An independent, local-first Android companion app for Bajaj Pulsar motorcycles that fixes the official Bajaj Ride Connect app's forced re-login and lack of data retention.
+An independent Android companion for Bajaj Pulsar motorcycles, built with Kotlin and Jetpack Compose. It keeps accepted login credentials encrypted on your device and provides local records you can open with the bike off and without a network connection.
 
-## Key Features
+This is an interoperability research project, not an official Bajaj app. Initial sign-in needs a registered Bajaj account, your VIN and dealer access code, and internet access. Compatibility with every model and future Bajaj API changes is not guaranteed.
 
-- **Persistent Login**: Users stay logged in across app restarts and device reboots
-- **Offline Support**: No network required to view basic information
-- **Sync-Ready**: Data sync planned for future versions
-- **Native Android**: Built with Kotlin + Jetpack Compose
-- **TDD**: All tests are green and follow the TDD approach
+## Available now
 
-## What It Fixes
+- **Persistent sign-in:** Android Keystore-backed AES-GCM storage for credentials and tokens; silent re-authentication when tokens are rejected.
+- **Offline bike details:** the matching VIN's model/nickname is cached locally; a failed background refresh does not block local records.
+- **Manual trip log:** enter start/end odometer readings, resume an unfinished trip after restarting, and browse paginated history with distance and duration.
+- **Service reminders:** create reminders with a due odometer, a calendar date, or both; mark them complete. Either threshold makes a reminder due, whichever comes first.
+- **Per-bike persistence:** Android-native SQLite stores profiles, trips, telemetry records and reminders in app-private storage.
+- **Safe recovery:** failed local reads offer a read-only retry; a failed refresh after a successful save does not invite duplicate writes.
 
-### Official App Issues
-1. **Forced Re-login**: The official app forgets user credentials on cold start, requiring re-authentication every time
-2. **No Data Retention**: User data is not persisted between sessions
-3. **Network Dependency**: The official app requires constant internet connection even for basic operations
+The reminder odometer is a recorded trip reading, **not live vehicle data**. Reminder dates use the device's time zone. Reminders are checked while viewing the app; background notifications are not implemented. Trips are manually entered, not automatically captured or synced with Bajaj.
 
-### Our Solution
-1. **Persistent Credentials**: VIN and access code are encrypted and stored locally using Android Keystore
-2. **Silent Re-authentication**: When tokens expire or are rejected, the app silently fetches new ones
-3. **Offline Mode**: Users can view their bike information and use core features without internet
+## Build and test
+
+Requires JDK 21, Android SDK 36 and a configured `local.properties` or `ANDROID_HOME`. The app supports Android 8.0/API 26 and newer.
+
+```sh
+./gradlew test
+./gradlew :app:assembleDebug
+./gradlew :app:lintDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+Core tests use JUnit 5. App tests use JUnit 4 and Robolectric, including native SQLite on API 26 and 35. The first test run needs network access for dependencies and Robolectric's Android SDK jars; Gradle's `--offline` does not control Robolectric's separate SDK resolver. Sandboxed runs also need a writable Java `user.home` for Robolectric's lock/cache, and a writable Gradle cache.
+
+Tests use synthetic credentials and deterministic clocks. No motorcycle or live Bajaj account is needed. BLE/device integration has not been validated by these tests.
 
 ## Architecture
 
-The app follows a clean architecture with clear separation of concerns:
-
-```
-app/
-├── ui/              # Jetpack Compose UI screens
-│   ├── LoginScreen.kt
-│   ├── HomeScreen.kt
-│   └── Theme.kt
-├── ui/viewmodel/    # ViewModel layer
-│   └── AppViewModel.kt
-├── KeystoreSecretStore.kt  # Encrypted secret storage
-└── MainActivity.kt
-
-core/
-├── model/           # Data models
-│   ├── Session.kt
-│   ├── Credentials.kt
-│   └── Vin.kt
-├── session/         # Session persistence layer
-│   ├── SessionRepository.kt
-│   └── SessionContract.kt
-├── network/         # Network layer with auth management
-│   ├── BajajApi.kt
-│   └── BajajSessionManager.kt
-└── data/            # Database layer (planned)
-└── ble/            # Bluetooth layer (planned)
+```text
+app/                  Compose screens, ViewModel, Keystore, native SQLiteOpenHelper
+core/model/           Domain types: VIN, credentials, session, trips, reminders
+core/session/         Session persistence behind the SecretStore interface
+core/network/         Bajaj API client and authentication orchestration
+core/data/            Android-safe repository contracts, shared rules, test doubles
+core/data-jdbc/       Desktop/JVM SQLite adapter and its integration tests
 ```
 
-## Build Status
+The Android app depends on `core/data`, **not** `core/data-jdbc`. Desktop SQLite JDBC native libraries must not be packaged into the APK. Android persistence uses framework SQLite, without a new production dependency.
 
-- ✅ Core modules: All 16 tests passing
-- ✅ Network layer: All API endpoints recovered and tested
-- ✅ Authentication: Persistent login with silent re-authentication
-- ✅ UI: Login and home screens functional
-- ✅ Security: Encrypted storage with Keystore
-- ✅ Build: APK built successfully
+## Privacy and sign-out
 
-## Known Issues & Planned Improvements
+Credentials and bearer tokens are encrypted. Bike profiles, trip data, telemetry and reminders are **not separately database-encrypted**; they rely on Android's application sandbox and device storage protection. There is no in-app lock.
 
-### Currently Working
-- Login with VIN and access code
-- Persistent session across app restarts
-- Silent token refresh on rejection
-- Home screen displays bike info (model + VIN)
+Signing out removes saved credentials and tokens but **retains local records per VIN**. Signing back into that VIN shows them again. Clearing app storage or uninstalling removes the local database; there is no export/backup workflow yet. Do not rely on this research app as your only copy of service history.
 
-### Planned for Future Versions
-- Trip logging and telemetry
-- Bluetooth cluster data streaming
-- Service reminders
-- Turn-by-turn navigation integration
-- Full offline functionality
+No analytics or developer-controlled server receives these records. Sign-in and vehicle refresh contact Bajaj. See [the security guide](docs/SECURITY.md).
 
-## API Recovery Notes
+## API recovery
 
-The app was reverse-engineered from the official `com.bajajconnect.ib` v1.1.14 APK. Key discoveries:
+The initial API contract was recovered from the official `com.bajajconnect.ib` v1.1.14 APK. See [API notes](docs/recon/api.md) and [capture instructions](docs/recon/CAPTURE.md).
 
-1. **Two Token System**: 
-   - `appToken` (from `/api/whoami`) used for all API calls
-   - `userToken` (from `/api/ib/rc/login`) never used as a bearer token in the current app
+- `appToken` from `/api/whoami` authorizes login and most documented endpoints.
+- `userToken` from login authorizes `/api/ib/rc/customer/vehicles`.
+- Silent sign-in relies on persisting the user's access code; no refresh-token endpoint was found.
 
-2. **Vehicle List Endpoint**: The `/api/ib/rc/customer/vehicles` endpoint unexpectedly uses `userToken` as the bearer token, not `appToken`.
+This does not establish why the official app exhibits the reported login problem or prove that its own storage is absent.
 
-3. **No Refresh Tokens**: There's no OTP, password, or refresh token endpoint - silent re-login relies on dealer access code persistence.
+## Still planned
 
-## Security
-
-- All secrets (VIN, access code, tokens) are encrypted using AES-GCM
-- Encryption keys are stored in Android Keystore (never extracted)
-- No network security configuration pinning (to allow certificate rotation)
-- `android:allowBackup="false"` to prevent secret extraction from backups
-
-## Testing
-
-The app follows TDD principles:
-- All API endpoints have contract tests
-- Session persistence is thoroughly tested
-- Token refresh logic has single-flight tests
-- Edge cases covered (unregistered vehicles, invalid access codes)
-
-## Installation
-
-1. Build the app: `./gradlew :app:assembleDebug`
-2. Install on device: `adb install -r app/build/outputs/apk/debug/app-debug.apk`
-3. Launch the companion app
+- Bluetooth protocol recovery and automatic cluster telemetry/trip capture. Needs a capture with the bike ignition on; no protocol is invented here.
+- Background service reminder notifications.
+- Cloud trip sync, export/restore and navigation integration.
+- On-device testing with the bike and a connected Android phone.
 
 ## Contributing
 
-This is a research project focused on reverse-engineering Bajaj's authentication system. Contributions should:
-
-- Follow the existing TDD approach
-- Never commit real VIN, access codes, or tokens
-- Use synthetic VIN `MD2ABCDEFGH123456` for tests
-- Focus on code quality and test coverage
-
-## Credits
-
-- Reverse-engineered from official Bajaj Ride Connect app
-- Based on static analysis of Hermes bundle and APK resources
-- Used synthetic test data to avoid exposing real credentials
+Use test-first changes and conventional commit messages. Never commit real VINs, access codes, tokens or raw captures. Use the synthetic VIN `MD2ABCDEFGH123456` in tests and redact identifying ride/location data before sharing logs.

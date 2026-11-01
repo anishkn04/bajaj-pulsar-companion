@@ -1,10 +1,12 @@
 package dev.pulsarconnect.app.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -22,12 +24,20 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -41,6 +51,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.pulsarconnect.core.data.isDue
 
 @Composable
 fun PulsarConnectApp(viewModel: AppViewModel) {
@@ -57,10 +68,106 @@ fun PulsarConnectApp(viewModel: AppViewModel) {
                 busy = current.busy,
                 onSignIn = viewModel::signIn,
             )
-            is UiState.SignedIn -> HomeScreen(
-                state = current,
-                onSignOut = viewModel::signOut,
+            is UiState.SignedIn -> SignedInScreen(current, viewModel)
+        }
+    }
+}
+
+@Composable
+private fun SignedInScreen(state: UiState.SignedIn, viewModel: AppViewModel) {
+    var tab by rememberSaveable(state.vin) { mutableStateOf("home") }
+    val snackbarHostState = remember(state.vin) { SnackbarHostState() }
+    val latestState by rememberUpdatedState(state)
+    LaunchedEffect(state.vin, state.error, state.localLoadFailed) {
+        state.error?.let { error ->
+            val result = snackbarHostState.showSnackbar(
+                message = error,
+                actionLabel = if (state.localLoadFailed) "Retry" else "Dismiss",
+                withDismissAction = true,
+                duration = SnackbarDuration.Indefinite,
             )
+            if (result == SnackbarResult.ActionPerformed) {
+                if (latestState.localLoadFailed) {
+                    if (!latestState.busy && !latestState.localLoading) {
+                        viewModel.retryLocalRecords()
+                    }
+                } else {
+                    viewModel.clearError()
+                }
+            }
+        }
+    }
+    BackHandler(enabled = tab != "home") { tab = "home" }
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState, modifier = Modifier.imePadding()) },
+    ) { innerPadding ->
+        Box(Modifier.fillMaxSize().padding(innerPadding).consumeWindowInsets(innerPadding)) {
+            when (tab) {
+                "trips" -> TripHistoryScreen(
+                    state = state,
+                    onBack = { tab = "home" },
+                    onStartTrip = viewModel::startTrip,
+                    onEndTrip = viewModel::endTrip,
+                    onLoadMore = viewModel::loadMoreTrips,
+                    onClearError = viewModel::clearError,
+                    onRetry = viewModel::retryLocalRecords,
+                )
+                "reminders" -> RemindersScreen(
+                    state = state,
+                    onBack = { tab = "home" },
+                    onAddReminder = viewModel::addReminder,
+                    onCompleteReminder = viewModel::completeReminder,
+                    onClearError = viewModel::clearError,
+                    onRetry = viewModel::retryLocalRecords,
+                )
+                else -> HomeScreen(
+                    state = state,
+                    onSignOut = viewModel::signOut,
+                    onTrips = { tab = "trips" },
+                    onReminders = { tab = "reminders" },
+                    onClearError = viewModel::clearError,
+                    onRetry = viewModel::retryLocalRecords,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun LocalDataStatus(
+    state: UiState.SignedIn,
+    onClearError: () -> Unit,
+    onRetry: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            "Saved on this phone for this VIN. Available offline; no cloud sync.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (state.localLoading || state.busy) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                Text(if (state.localLoading) "Loading saved records…" else "Saving…")
+            }
+        }
+        state.error?.let { error ->
+            Text(error, color = MaterialTheme.colorScheme.error)
+            if (!state.localLoadFailed) {
+                TextButton(onClick = onClearError, enabled = !state.busy) { Text("Dismiss error") }
+            }
+        }
+        if (state.localLoadFailed) {
+            Text(
+                "Saved records could not be loaded. Trips and reminders are read-only until loading succeeds.",
+                color = MaterialTheme.colorScheme.error,
+            )
+            TextButton(onClick = onRetry, enabled = !state.busy && !state.localLoading) {
+                Text("Retry loading records")
+            }
         }
     }
 }
@@ -121,8 +228,8 @@ private fun LoginScreen(
         )
 
         Text(
-            text = "Log in once. Trips, reminders and cluster data stay with you, " +
-                "even when the bike is off.",
+            text = "Log in to keep a manual trip log and service reminders on this phone. " +
+                "Saved records are available offline; no Bluetooth or cloud sync is provided.",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -208,6 +315,10 @@ private fun LoginScreen(
 private fun HomeScreen(
     state: UiState.SignedIn,
     onSignOut: () -> Unit,
+    onTrips: () -> Unit,
+    onReminders: () -> Unit,
+    onClearError: () -> Unit,
+    onRetry: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -237,27 +348,36 @@ private fun HomeScreen(
             )
         }
 
-        StatusCard(
-            title = "Cluster",
-            value = "Not connected",
-            detail = "Start the bike and pair over Bluetooth to see live data here.",
-        )
+        LocalDataStatus(state, onClearError, onRetry)
         StatusCard(
             title = "Trips",
-            value = "No trips yet",
-            detail = "Rides recorded from the cluster will be kept on this phone.",
+            value = "${state.trips.size}${if (state.hasMoreTrips) "+" else ""} saved trips",
+            detail = if (state.activeTrip != null) "A manual trip is in progress."
+                else "Manually record start and end odometer readings. Local only; no BLE or cloud sync.",
+            actionLabel = "View trips",
+            onAction = onTrips,
         )
+        val now = rememberCurrentTimeMillis()
+        val pending = state.reminders.count { !it.completed }
+        val due = state.reminders.count { it.isDue(state.lastOdometer ?: Double.NaN, now) }
         StatusCard(
             title = "Reminders",
-            value = "Nothing due",
-            detail = "Service reminders live here, not in the cloud.",
+            value = "$pending pending · $due due",
+            detail = "Due status uses dates and your latest recorded odometer, not live bike data.",
+            actionLabel = "Manage reminders",
+            onAction = onReminders,
         )
 
+        Text(
+            "Signing out leaves local trip and reminder data on this phone.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End,
         ) {
-            TextButton(onClick = onSignOut) {
+            TextButton(onClick = onSignOut, enabled = !state.busy) {
                 Text("Sign out", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
@@ -269,6 +389,8 @@ private fun StatusCard(
     title: String,
     value: String,
     detail: String,
+    actionLabel: String,
+    onAction: () -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -294,6 +416,7 @@ private fun StatusCard(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            TextButton(onClick = onAction) { Text(actionLabel) }
         }
     }
 }

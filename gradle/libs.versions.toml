@@ -4,6 +4,8 @@ coroutines = "1.10.1"
 serialization = "1.8.0"
 sqliteBundled = "3.49.1.0"
 junit = "5.12.1"
+junit4 = "4.13.2"
+robolectric = "4.14.1"
 junitPlatform = "1.12.1"
 turbine = "1.2.0"
 okhttp = "4.12.0"
@@ -19,6 +21,8 @@ kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-c
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }
+junit4 = { module = "junit:junit", version.ref = "junit4" }
+robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher", version.ref = "junitPlatform" }
 turbine = { module = "app.cash.turbine:turbine", version.ref = "turbine" }
 sqlite-bundled = { module = "org.xerial:sqlite-jdbc", version.ref = "sqliteBundled" }
