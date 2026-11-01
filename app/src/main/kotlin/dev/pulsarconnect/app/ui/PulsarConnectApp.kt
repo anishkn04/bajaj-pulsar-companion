@@ -119,6 +119,8 @@ private fun SignedInScreen(state: UiState.SignedIn, viewModel: AppViewModel) {
                     onCompleteReminder = viewModel::completeReminder,
                     onClearError = viewModel::clearError,
                     onRetry = viewModel::retryLocalRecords,
+                    onNotificationsEnabledChange = viewModel::setReminderNotificationsEnabled,
+                    onNotificationsRefresh = viewModel::refreshReminderNotifications,
                 )
                 else -> HomeScreen(
                     state = state,
@@ -369,7 +371,7 @@ private fun HomeScreen(
         )
 
         Text(
-            "Signing out leaves local trip and reminder data on this phone.",
+            "Signing out stops reminder alerts but keeps your alert preference and local trip and reminder data on this phone.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

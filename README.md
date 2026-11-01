@@ -10,10 +10,22 @@ This is an interoperability research project, not an official Bajaj app. Initial
 - **Offline bike details:** the matching VIN's model/nickname is cached locally; a failed background refresh does not block local records.
 - **Manual trip log:** enter start/end odometer readings, resume an unfinished trip after restarting, and browse paginated history with distance and duration.
 - **Service reminders:** create reminders with a due odometer, a calendar date, or both; mark them complete. Either threshold makes a reminder due, whichever comes first.
+- **Optional background alerts:** local WorkManager checks notify you of due reminders, with Android permission/channel controls, persistent duplicate suppression, and sign-out/opt-out cancellation.
 - **Per-bike persistence:** Android-native SQLite stores profiles, trips, telemetry records and reminders in app-private storage.
 - **Safe recovery:** failed local reads offer a read-only retry; a failed refresh after a successful save does not invite duplicate writes.
 
-The reminder odometer is a recorded trip reading, **not live vehicle data**. Reminder dates use the device's time zone. Reminders are checked while viewing the app; background notifications are not implemented. Trips are manually entered, not automatically captured or synced with Bajaj.
+The reminder odometer is a recorded trip reading, **not live vehicle data**. Reminder dates use the device's time zone. Trips are manually entered, not automatically captured or synced with Bajaj.
+
+## Background service alerts
+
+Open **Service reminders → Enable alerts** to opt in. Android 13 and newer request notification permission only after you tap the button. If permission or the Service reminders channel is blocked, the screen shows delivery as blocked and offers Android notification settings. You can still view and manage reminders without allowing alerts.
+
+- Background checks run approximately every **12 hours**, with an additional queued check after sign-in/restore, recorded odometer changes, reminder changes, or returning to alert settings. Overlapping changes queue a follow-up check instead of cancelling an in-flight delivery.
+- WorkManager persists scheduling across process restarts and device reboots. Android battery restrictions, Doze and force-stop can delay or prevent execution; these are **not exact-time alarms**. Open the app to review service dates rather than relying solely on notifications.
+- Checks use only the currently signed-in VIN's local records. No network or running motorcycle is required. Without a saved odometer, date reminders still work, but odometer-only reminders need a recorded trip reading.
+- Each reminder is recorded as delivered once; dismissing an alert, reopening the app, or disabling/re-enabling alerts does not deliberately repeat it. Reminders blocked by permission/channel settings are not marked delivered.
+- Completing a reminder clears its alert. Signing out or disabling alerts cancels scheduled checks and displayed service alerts. Sign-out retains your device's opt-in preference; signing back in resumes checks.
+- Notifications contain generic text and open the app. They do not include a VIN, title, access code, token or location, including on the lock screen.
 
 ## Build and test
 
@@ -26,7 +38,7 @@ Requires JDK 21, Android SDK 36 and a configured `local.properties` or `ANDROID_
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Core tests use JUnit 5. App tests use JUnit 4 and Robolectric, including native SQLite on API 26 and 35. The first test run needs network access for dependencies and Robolectric's Android SDK jars; Gradle's `--offline` does not control Robolectric's separate SDK resolver. Sandboxed runs also need a writable Java `user.home` for Robolectric's lock/cache, and a writable Gradle cache.
+Core tests use JUnit 5. App tests use JUnit 4, Robolectric and WorkManager's test helpers, including native SQLite, notification permission/channel behavior, persistent delivery suppression, sign-out races, and overlapping-work scheduling on API 26 and 35. The first test run needs network access for dependencies and Robolectric's Android SDK jars; Gradle's `--offline` does not control Robolectric's separate SDK resolver. Sandboxed runs also need a writable Java `user.home` for Robolectric's lock/cache, and a writable Gradle cache.
 
 Tests use synthetic credentials and deterministic clocks. No motorcycle or live Bajaj account is needed. BLE/device integration has not been validated by these tests.
 
@@ -64,7 +76,7 @@ This does not establish why the official app exhibits the reported login problem
 ## Still planned
 
 - Bluetooth protocol recovery and automatic cluster telemetry/trip capture. Needs a capture with the bike ignition on; no protocol is invented here.
-- Background service reminder notifications.
+
 - Cloud trip sync, export/restore and navigation integration.
 - On-device testing with the bike and a connected Android phone.
 

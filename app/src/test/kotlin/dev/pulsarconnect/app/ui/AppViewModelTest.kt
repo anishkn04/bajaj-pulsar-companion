@@ -1,5 +1,6 @@
 package dev.pulsarconnect.app.ui
 
+import dev.pulsarconnect.app.notifications.ReminderNotificationActions
 import dev.pulsarconnect.core.data.InMemoryBikeRepository
 import dev.pulsarconnect.core.data.InMemoryReminderRepository
 import dev.pulsarconnect.core.data.InMemoryTripRepository
@@ -46,6 +47,31 @@ class AppViewModelTest {
         override fun delete(key: String) { values.remove(key) }
     }
     private val sessionRepository = SessionRepository(secrets)
+    private val notifications = RecordingNotifications()
+
+    private class RecordingNotifications : ReminderNotificationActions {
+        override var enabled = false
+            private set
+        val events = mutableListOf<String>()
+        var failScheduling = false
+        override fun setEnabled(enabled: Boolean) {
+            if (failScheduling) throw IllegalStateException("scheduler unavailable")
+            this.enabled = enabled
+            events.add("enabled:$enabled")
+        }
+        override fun refresh() {
+            if (failScheduling) throw IllegalStateException("scheduler unavailable")
+            events.add("refresh")
+        }
+        override fun onSignedOut() {
+            events.add("signOut")
+            if (failScheduling) throw IllegalStateException("scheduler unavailable")
+        }
+        override fun onReminderCompleted(id: Long) {
+            events.add("completed:$id")
+            if (failScheduling) throw IllegalStateException("scheduler unavailable")
+        }
+    }
 
     @Before fun setUp() {
         Dispatchers.setMain(dispatcher)
@@ -64,12 +90,85 @@ class AppViewModelTest {
         val api = BajajApi("https://example.invalid")
         return AppViewModel(
             BajajSessionManager(api, sessionRepository), api, bikes, tripRepository, reminders,
-            clock = { now }, zone = ZoneOffset.UTC, ioDispatcher = dispatcher, fetchVehicles = fetch,
+            clock = { now }, zone = ZoneOffset.UTC, ioDispatcher = dispatcher,
+                        notificationActions = notifications, fetchVehicles = fetch,
         )
     }
 
     private fun signedIn(vm: AppViewModel) = vm.state.value as UiState.SignedIn
     private suspend fun cacheBike() = bikes.upsertBike(BikeProfile(vin, "Cached Pulsar", null, null, null))
+
+    @Test fun `restoring session resumes opted in notifications and actions refresh recorded odometer`() = runTest(dispatcher) {
+        notifications.setEnabled(true)
+        val vm = viewModel()
+        advanceUntilIdle()
+        assertTrue(signedIn(vm).reminderNotificationsEnabled)
+        assertTrue(notifications.events.contains("refresh"))
+        notifications.events.clear()
+        vm.startTrip("100")
+        advanceUntilIdle()
+        assertEquals(listOf("refresh"), notifications.events)
+        notifications.events.clear()
+        now += 1000
+        vm.endTrip("110")
+        advanceUntilIdle()
+        assertEquals(listOf("refresh"), notifications.events)
+    }
+
+    @Test fun `opt in preference changes and resume rechecks are wired without modifying records`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+        vm.setReminderNotificationsEnabled(true)
+        assertTrue(notifications.enabled)
+        assertTrue(signedIn(vm).reminderNotificationsEnabled)
+        vm.setReminderNotificationsEnabled(false)
+        assertFalse(notifications.enabled)
+        assertFalse(signedIn(vm).reminderNotificationsEnabled)
+        notifications.events.clear()
+        vm.refreshReminderNotifications()
+        assertEquals(listOf("refresh"), notifications.events)
+        assertTrue(trips.getTrips(vin, 100, 0).isEmpty())
+        assertTrue(reminders.getReminders(vin).isEmpty())
+    }
+
+    @Test fun `adding and completing reminders schedules checks and cancels delivered alert`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+        notifications.events.clear()
+        vm.addReminder("Oil", "100", "")
+        advanceUntilIdle()
+        assertEquals(listOf("refresh"), notifications.events)
+        val id = signedIn(vm).reminders.single().id!!
+        notifications.events.clear()
+        vm.completeReminder(id)
+        advanceUntilIdle()
+        assertEquals(listOf("completed:$id", "refresh"), notifications.events)
+        notifications.events.clear()
+        vm.completeReminder(id)
+        advanceUntilIdle()
+        assertTrue(notifications.events.isEmpty()) // Rejected mutation must not emit notification side effects.
+    }
+
+    @Test fun `scheduler failure never turns saved records into failed writes or blocks sign out`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+        notifications.failScheduling = true
+        vm.addReminder("Oil", "100", "")
+        advanceUntilIdle()
+        assertEquals(1, signedIn(vm).reminders.size)
+        assertFalse(signedIn(vm).localLoadFailed)
+        assertNotNull(signedIn(vm).error)
+        assertFalse(signedIn(vm).busy)
+        vm.signOut()
+        assertTrue(notifications.events.contains("signOut"))
+        advanceUntilIdle()
+        assertTrue(vm.state.value is UiState.SignedOut)
+        assertNull(sessionRepository.load())
+        notifications.events.clear()
+        vm.setReminderNotificationsEnabled(true)
+        vm.refreshReminderNotifications()
+        assertTrue(notifications.events.isEmpty())
+    }
 
     @Test fun `offline launch restores bike active trip and reminders`() = runTest(dispatcher) {
         cacheBike()

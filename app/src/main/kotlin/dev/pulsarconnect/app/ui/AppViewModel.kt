@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import dev.pulsarconnect.app.AppContainer
+import dev.pulsarconnect.app.notifications.NoOpReminderNotifications
+import dev.pulsarconnect.app.notifications.ReminderNotificationActions
 import dev.pulsarconnect.core.data.BikeRepository
 import dev.pulsarconnect.core.data.ReminderRepository
 import dev.pulsarconnect.core.data.TripRepository
@@ -40,6 +42,7 @@ class AppViewModel(
     private val clock: () -> Long = System::currentTimeMillis,
     private val zone: ZoneId = ZoneId.systemDefault(),
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val notificationActions: ReminderNotificationActions = NoOpReminderNotifications,
     private val fetchVehicles: suspend () -> List<Bike> = {
         sessionManager.withSession { stored ->
             api.vehicles(requireNotNull(stored.session.userToken) { "Missing vehicle token" })
@@ -102,7 +105,11 @@ class AppViewModel(
         val scope = CoroutineScope(viewModelScope.coroutineContext + job)
         signedInScope = scope
         // A restored session opens the local UI immediately; network refresh never gates it.
-        _state.value = UiState.SignedIn(vin = vin, bikeName = null)
+        _state.value = UiState.SignedIn(
+            vin = vin, bikeName = null,
+            reminderNotificationsEnabled = notificationActions.enabled,
+        )
+        refreshReminderNotifications()
         scope.launch {
             try {
                 reloadLocal(vin, version, PAGE_SIZE)
@@ -191,6 +198,9 @@ class AppViewModel(
     fun completeReminder(id: Long) = localAction { current ->
         require(current.reminders.any { it.id == id && !it.completed }) { "This reminder is not pending for your bike." }
         reminders.completeReminder(id, clock())
+        notificationAction("Reminder completed, but its alert could not be cleared. Check Android notification settings.") {
+            notificationActions.onReminderCompleted(id)
+        }
     }
 
     private fun localAction(action: suspend (UiState.SignedIn) -> Unit) {
@@ -204,6 +214,9 @@ class AppViewModel(
             try {
                 action(current)
                 saved = true
+                notificationAction("Records saved, but background alerts could not be updated. Reopen reminder settings to try again.") {
+                    notificationActions.refresh()
+                }
                 reloadLocal(current.vin, version, maxOf(PAGE_SIZE, current.trips.size))
             } catch (error: Exception) {
                 if (error is CancellationException) throw error
@@ -264,6 +277,33 @@ class AppViewModel(
         }
     }
 
+    fun setReminderNotificationsEnabled(enabled: Boolean) {
+        if (_state.value !is UiState.SignedIn) return
+        notificationAction("Could not change background alerts. Please try again.") {
+            notificationActions.setEnabled(enabled)
+        }
+        val current = _state.value as? UiState.SignedIn ?: return
+        _state.value = current.copy(reminderNotificationsEnabled = notificationActions.enabled)
+    }
+
+    fun refreshReminderNotifications() {
+        if (_state.value !is UiState.SignedIn) return
+        notificationAction("Background alerts could not be updated. Reopen reminder settings to try again.") {
+            notificationActions.refresh()
+        }
+        val current = _state.value as? UiState.SignedIn ?: return
+        _state.value = current.copy(reminderNotificationsEnabled = notificationActions.enabled)
+    }
+
+    private fun notificationAction(message: String, action: () -> Unit) {
+        try {
+            action()
+        } catch (_: Exception) {
+            val current = _state.value as? UiState.SignedIn ?: return
+            _state.value = current.copy(error = message)
+        }
+    }
+
     fun clearError() {
         val current = _state.value as? UiState.SignedIn ?: return
         _state.value = current.copy(error = null)
@@ -271,6 +311,12 @@ class AppViewModel(
 
     fun signOut() {
         if (_state.value !is UiState.SignedIn) return
+        val alertCleanupFailed = try {
+            notificationActions.onSignedOut()
+            false
+        } catch (_: Exception) {
+            true
+        }
         val version = ++generation
         signedInJob?.cancel()
         signedInScope = null
@@ -278,7 +324,9 @@ class AppViewModel(
         viewModelScope.launch {
             try {
                 withContext(ioDispatcher) { sessionManager.signOut() }
-                if (generation == version) _state.value = UiState.SignedOut()
+                if (generation == version) _state.value = UiState.SignedOut(
+                    error = if (alertCleanupFailed) "Signed out, but alert cleanup failed. Disable notifications in Android settings." else null,
+                )
             } catch (error: Exception) {
                 if (error is CancellationException) throw error
                 if (generation == version) _state.value = UiState.SignedOut(error = "Could not clear saved credentials. Please restart and try signing out again.")
@@ -306,6 +354,7 @@ class AppViewModel(
             override fun <T : ViewModel> create(modelClass: Class<T>): T = AppViewModel(
                 container.sessionManager, container.api,
                 container.database.bikes, container.database.trips, container.database.reminders,
+                notificationActions = container.reminderNotifications,
             ) as T
         }
     }
@@ -320,6 +369,7 @@ sealed interface UiState {
         val trips: List<Trip> = emptyList(),
         val activeTrip: Trip? = null,
         val reminders: List<ServiceReminder> = emptyList(),
+        val reminderNotificationsEnabled: Boolean = false,
         val localLoading: Boolean = true,
         val localLoadFailed: Boolean = false,
         val busy: Boolean = false,

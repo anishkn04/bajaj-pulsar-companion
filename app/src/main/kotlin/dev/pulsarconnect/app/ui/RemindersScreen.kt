@@ -39,6 +39,8 @@ internal fun RemindersScreen(
     onCompleteReminder: (Long) -> Unit,
     onClearError: () -> Unit,
     onRetry: () -> Unit,
+    onNotificationsEnabledChange: (Boolean) -> Unit,
+    onNotificationsRefresh: () -> Unit,
 ) {
     var title by rememberSaveable(state.vin) { mutableStateOf("") }
     var odometer by rememberSaveable(state.vin) { mutableStateOf("") }
@@ -70,10 +72,13 @@ internal fun RemindersScreen(
         }
         item { LocalDataStatus(state, onClearError, onRetry) }
         item {
-            Text(
-                "Check reminders here in the app. No background notifications are scheduled.",
-                style = MaterialTheme.typography.bodyMedium,
+            ReminderNotificationSettings(
+                enabled = state.reminderNotificationsEnabled,
+                onEnabledChange = onNotificationsEnabledChange,
+                onNotificationsRefresh = onNotificationsRefresh,
             )
+        }
+        item {
             Text(
                 state.lastOdometer?.let { "Latest recorded odometer: ${formatRecordNumber(it)} km (not live)." }
                     ?: "Odometer unknown. Distance-based due status needs a manual trip reading.",

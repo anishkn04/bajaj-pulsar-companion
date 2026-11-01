@@ -7,6 +7,8 @@
 | VIN, access code | app-private storage | AES-GCM key in the Android Keystore |
 | App token, user token | app-private storage | same key |
 | Bike profiles, trips, telemetry, reminders | native Android SQLite database | app-private storage; not separately encrypted |
+| Alert opt-in/pause state and delivered/completed reminder IDs | app-private preferences | no credentials, VINs, titles or locations |
+| Background scheduling | WorkManager's app-private database | generic work names; no credentials or vehicle data in work input |
 
 Nothing is uploaded to a server we control. There is no analytics, no crash
 reporting SDK and no account with us.
@@ -37,6 +39,20 @@ Signing out clears saved credentials/tokens, **not** bike profiles, trips or
 reminders. Records remain per VIN for the next sign-in. Clear Android app
 storage or uninstall to remove them. There is no export/restore workflow yet;
 users should retain another copy of important service records.
+
+Background service alerts are opt-in. They read the signed-in VIN's local
+records and saved odometer without contacting Bajaj. Android permission and
+channel settings are checked before delivery. Notification content and its
+public/lock-screen version are generic: no VIN, reminder title, access code,
+token or location. An immutable content intent opens the app without sensitive
+extras. Notification listeners can still observe that an alert occurred.
+
+Signing out also pauses/cancels background checks and clears displayed service
+alerts while retaining the opt-in and delivery-ID history. Turning alerts off
+cancels checks and displayed alerts without deleting reminders. Sign-in resumes
+checks only for the current session. Delivery deduplication is local; clearing
+app data resets it along with the records. These best-effort background alerts
+are not exact alarms or a safety-critical service schedule.
 
 We do **not** defend against:
 
