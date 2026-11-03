@@ -1,29 +1,29 @@
 package dev.pulsarconnect.app.ble
 
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.viewModelScope
-import dev.pulsarconnect.app.AppContainer
 import dev.pulsarconnect.core.ble.AdapterState
-import dev.pulsarconnect.core.ble.BikeConnection
 import dev.pulsarconnect.core.ble.BikeDeviceStore
+import dev.pulsarconnect.core.ble.BikeLinkController
+import dev.pulsarconnect.core.ble.BikeLinkPreferences
+import dev.pulsarconnect.core.ble.BikeLinkSettings
 import dev.pulsarconnect.core.ble.BikeScanner
 import dev.pulsarconnect.core.ble.BikeTarget
 import dev.pulsarconnect.core.ble.BlePermission
-import dev.pulsarconnect.core.ble.BleScanner
 import dev.pulsarconnect.core.ble.BleTransport
+import dev.pulsarconnect.core.ble.ClusterControlState
 import dev.pulsarconnect.core.ble.ConnectionState
 import dev.pulsarconnect.core.ble.DiscoveredDevice
-import dev.pulsarconnect.core.ble.PhoneStatusProtocol
-import dev.pulsarconnect.core.ble.PhoneStatusSender
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Dispatchers
+import androidx.lifecycle.ViewModel
 
 data class BleUiState(
     val vin: String? = null,
@@ -35,112 +35,117 @@ data class BleUiState(
     val adapterState: AdapterState = AdapterState.UNKNOWN,
     val missingPermissions: Set<BlePermission> = emptySet(),
     val error: String? = null,
-    val phoneStatusAvailable: Boolean = false,
     val phoneStatusEnabled: Boolean = false,
+    val phoneStatusAvailable: Boolean = false,
     val phoneStatusSending: Boolean = false,
     val phoneStatusError: String? = null,
+    val settings: BikeLinkSettings = BikeLinkSettings(),
+    val controlState: ClusterControlState = ClusterControlState(),
 )
 
+/** Hook for the app layer to start/stop the foreground service when mirroring changes. */
+interface BikeLinkRuntime {
+    fun setEnabled(enabled: Boolean)
+}
+
+/**
+ * App-scoped bridge between the UI and the [BikeLinkController].
+ *
+ * The controller (and therefore the connection, sender and CONTROL poller) lives in the
+ * application scope so a foreground service can keep mirroring alive after the activity is
+ * gone. This view model only reflects state and routes user actions to the controller and the
+ * runtime.
+ */
 class BleViewModel(
+    application: android.app.Application,
     private val devices: BikeDeviceStore,
-    private val scanner: BleScanner,
-    private val connection: BikeConnection,
+    private val scanner: BikeScanner,
     private val transport: BleTransport,
-    private val phoneStatusSource: PhoneStatusSource = PhoneStatusSource { emptyFlow() },
+    private val controller: BikeLinkController,
+    private val runtime: BikeLinkRuntime,
 ) : ViewModel() {
 
-    private val phoneStatusSender = PhoneStatusSender(
-        connection = connection,
-        statuses = phoneStatusSource.statuses(),
-        scope = viewModelScope,
-        onStopped = ::onPhoneStatusStopped,
-    )
-
-    private val _state = MutableStateFlow(
-        BleUiState(
-            adapterState = transport.adapterState.value,
-            missingPermissions = transport.missingPermissions(),
-        ),
-    )
+    private val _state = MutableStateFlow(BleUiState(
+        adapterState = transport.adapterState.value,
+        missingPermissions = transport.missingPermissions(),
+    ))
     val state: StateFlow<BleUiState> = _state.asStateFlow()
 
-    private var scanJob: Job? = null
+    /** Cluster CONTROL button counters, read-only. May be null when unsupported or not polling. */
+    val controlState: StateFlow<ClusterControlState> = controller.controlState
+
+    val settings: BikeLinkSettings
+        get() = controller.state.value.settings
+
     private var scanGeneration = 0L
+    private val job = SupervisorJob()
+    private val scope = CoroutineScope(job + Dispatchers.Main)
 
     init {
-        viewModelScope.launch {
-            connection.state.collect { current ->
-                val available = current is ConnectionState.Connected &&
-                    PhoneStatusProtocol.isSupportedBy(current.services)
-                _state.update { it.copy(connection = current, phoneStatusAvailable = available) }
-                if (current !is ConnectionState.Connected) stopPhoneStatus()
-            }
-        }
-        viewModelScope.launch {
+        scope.launch {
             transport.adapterState.collect { adapter ->
                 _state.update { it.copy(adapterState = adapter) }
             }
         }
-    }
-
-    /** Called when a session becomes available. Safe to call again after recreation. */
-    fun onSession(vin: String) {
-        val changed = _state.value.vin != vin
-        if (changed) {
-            stopScan()
-            stopPhoneStatus()
-            connection.stop()
-            _state.value = BleUiState()
-        }
-        transport.refreshAdapterState()
-        _state.update {
-            it.copy(
-                vin = vin,
-                selected = devices.selected(vin),
-                autoConnect = devices.autoConnect(vin),
-                missingPermissions = transport.missingPermissions(),
-                adapterState = transport.adapterState.value,
-            )
-        }
-        if (changed) {
-            val selected = devices.selected(vin)
-            if (selected != null && devices.autoConnect(vin)) {
-                connection.connect(selected)
+        scope.launch {
+            controller.state.collect { link ->
+                val connected = link.connection as? ConnectionState.Connected
+                val available = connected != null &&
+                    dev.pulsarconnect.core.ble.PhoneStatusProtocol.isSupportedBy(connected.services)
+                _state.update { current ->
+                    current.copy(
+                        vin = link.vin,
+                        selected = link.selected,
+                        autoConnect = link.autoConnect,
+                        connection = link.connection,
+                        settings = link.settings,
+                        devices = if (current.vin != link.vin) emptyList() else current.devices,
+                        phoneStatusEnabled = link.settings.mirroring,
+                        phoneStatusAvailable = available,
+                        phoneStatusSending = link.mirroringActive,
+                        phoneStatusError = link.mirroringError,
+                    )
+                }
             }
         }
-    }
+        scope.launch {
+            controller.controlState.collect { control ->
+                _state.update { it.copy(controlState = control) }
+            }
+        }
+        // Keep the runtime in sync with whether the controller is actively mirroring.
+        scope.launch {
+            var mirroringWasActive = false
+            controller.state.collect { link ->
+                val active = link.settings.mirroring && link.mirroringActive
+                if (active != mirroringWasActive) {
+                    mirroringWasActive = active
+                    runtime.setEnabled(active)
+                }
+            }
+        }
 
-    /**
-     * Auto-connect is foreground-only: there is no background service and background
-     * collection stops the platform scan and connection.
-     */
-    fun onForeground() {
-        val current = _state.value
         transport.refreshAdapterState()
-        _state.update {
-            it.copy(
-                missingPermissions = transport.missingPermissions(),
-                adapterState = transport.adapterState.value,
-            )
-        }
-        val vin = current.vin ?: return
-        val selected = devices.selected(vin) ?: return
-        if (!devices.autoConnect(vin)) return
-        val connectionState = connection.state.value
-        if (connectionState is ConnectionState.Idle ||
-            connectionState is ConnectionState.Failed ||
-            connectionState is ConnectionState.MissingPermissions ||
-            connectionState is ConnectionState.BluetoothUnavailable
-        ) {
-            connection.connect(selected)
-        }
     }
 
+    /** Re-attaches to the armed VIN after boot or a process restart. */
+    fun ensureRunning() {
+        controller.ensureRunning()
+    }
+
+    /** Called when a signed-in VIN becomes available. Changing VIN disarms mirroring. */
+    fun onSession(vin: String) {
+        controller.onSession(vin)
+    }
+
+    /** Foreground: resume the link when mirroring or auto-connect wants it. */
+    fun onForeground() {
+        controller.onForeground()
+    }
+
+    /** Background: keep the link when background mode is on, otherwise stop it. */
     fun onBackground() {
-        stopScan()
-        stopPhoneStatus()
-        connection.stop()
-        _state.update { it.copy(scanning = false) }
+        controller.onBackground()
     }
 
     fun refreshPlatformState() {
@@ -154,12 +159,12 @@ class BleViewModel(
     }
 
     fun scan() {
-        if (_state.value.vin == null || _state.value.scanning) return
+        val current = controller.state.value
+        if (current.vin == null || _state.value.scanning) return
         refreshPlatformState()
-        stopScan()
-        val generation = scanGeneration
+        val generation = ++scanGeneration
         _state.update { it.copy(scanning = true, error = null, devices = emptyList()) }
-        scanJob = viewModelScope.launch {
+        scope.launch {
             try {
                 scanner.scan().collect { found ->
                     if (generation == scanGeneration) {
@@ -183,70 +188,43 @@ class BleViewModel(
     }
 
     fun select(device: DiscoveredDevice) {
-        val vin = _state.value.vin ?: return
+        val vin = controller.state.value.vin ?: return
         val target = BikeTarget(id = device.id, name = device.name, vin = vin)
-        stopPhoneStatus(clearError = true)
         devices.select(target)
         _state.update { it.copy(selected = target, error = null) }
-        connection.connect(target, autoReconnect = devices.autoConnect(vin))
+        controller.select(device)
     }
 
     fun connect() {
-        val vin = _state.value.vin ?: return
-        val selected = devices.selected(vin) ?: run {
-            _state.update { it.copy(error = "Choose your bike from the scan results first.") }
-            return
-        }
-        connection.connect(selected, autoReconnect = devices.autoConnect(vin))
+        controller.connect()
     }
 
     fun disconnect() {
-        stopPhoneStatus(clearError = true)
-        connection.stop()
+        controller.disconnect()
     }
 
     fun retry() {
-        connection.retry()
+        controller.retry()
     }
 
     fun setAutoConnect(enabled: Boolean) {
-        val vin = _state.value.vin ?: return
-        devices.setAutoConnect(vin, enabled)
-        _state.update { it.copy(autoConnect = enabled) }
-        connection.setAutoReconnect(enabled)
+        controller.setAutoConnect(enabled)
     }
 
     fun clearSelection() {
-        val vin = _state.value.vin ?: return
-        stopPhoneStatus(clearError = true)
-        connection.stop()
-        devices.clear(vin)
-        _state.update { it.copy(selected = null, devices = emptyList()) }
+        controller.clearSelection()
     }
 
-    /**
-     * Starts or stops the opt-in battery/signal mirror. Enabling requires a connected peer
-     * exposing the writable GENERAL endpoint; the sender stops on any disconnect.
-     */
-    fun setPhoneStatusEnabled(enabled: Boolean) {
-        if (!enabled) {
-            stopPhoneStatus(clearError = true)
-            return
-        }
-        val current = _state.value
-        if (!current.phoneStatusAvailable) {
-            _state.update { it.copy(phoneStatusError = "Connect a compatible bike first.") }
-            return
-        }
-        if (current.phoneStatusEnabled && phoneStatusSender.running) return
-        _state.update {
-            it.copy(
-                phoneStatusEnabled = true,
-                phoneStatusSending = true,
-                phoneStatusError = null,
-            )
-        }
-        phoneStatusSender.start()
+    fun setMirroring(enabled: Boolean) {
+        controller.setMirroring(enabled)
+    }
+
+    fun setKeepInBackground(enabled: Boolean) {
+        controller.setKeepInBackground(enabled)
+    }
+
+    fun setStartOnBoot(enabled: Boolean) {
+        controller.setStartOnBoot(enabled)
     }
 
     fun clearError() {
@@ -254,59 +232,40 @@ class BleViewModel(
     }
 
     fun signOut() {
-        stopScan()
-        stopPhoneStatus()
-        connection.stop()
+        controller.signOut()
         _state.value = BleUiState()
     }
 
+    /** Cancels the view model's coroutines. For use in tests. */
+    fun cancel() {
+        job.cancel()
+    }
+
     override fun onCleared() {
-        phoneStatusSender.stop()
+        // The controller outlives this view model: do not stop it here.
+        job.cancel()
         super.onCleared()
     }
 
-    private fun onPhoneStatusStopped(error: Throwable?) {
-        _state.update {
-            it.copy(
-                phoneStatusEnabled = false,
-                phoneStatusSending = false,
-                phoneStatusError = if (error != null) {
-                    "Phone status mirroring stopped. Reconnect and try again."
-                } else {
-                    it.phoneStatusError
-                },
-            )
-        }
-    }
-
-    private fun stopPhoneStatus(clearError: Boolean = false) {
-        phoneStatusSender.stop()
-        _state.update {
-            it.copy(
-                phoneStatusEnabled = false,
-                phoneStatusSending = false,
-                phoneStatusError = if (clearError) null else it.phoneStatusError,
-            )
-        }
-    }
-
-    private fun stopScan() {
-        scanGeneration++
-        scanJob?.cancel()
-        scanJob = null
-        _state.update { it.copy(scanning = false) }
-    }
-
     companion object {
-        fun factory(container: AppContainer): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
+        fun factory(
+            application: android.app.Application,
+            devices: BikeDeviceStore,
+            scanner: BikeScanner,
+            transport: BleTransport,
+            controller: BikeLinkController,
+            runtime: BikeLinkRuntime,
+        ): androidx.lifecycle.ViewModelProvider.Factory = object : androidx.lifecycle.ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
-            override fun <T : ViewModel> create(modelClass: Class<T>): T = BleViewModel(
-                devices = container.bikeDevices,
-                scanner = BikeScanner(container.bleScanSource),
-                connection = container.bikeConnection,
-                transport = container.bleTransport,
-                phoneStatusSource = container.phoneStatusSource,
-            ) as T
+            override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T =
+                BleViewModel(
+                    application = application,
+                    devices = devices,
+                    scanner = scanner,
+                    transport = transport,
+                    controller = controller,
+                    runtime = runtime,
+                ) as T
         }
     }
 }

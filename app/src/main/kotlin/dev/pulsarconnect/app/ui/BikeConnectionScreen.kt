@@ -35,12 +35,16 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import dev.pulsarconnect.app.ble.AndroidBlePermissions
 import dev.pulsarconnect.app.ble.BleUiState
 import dev.pulsarconnect.core.ble.AdapterState
+import dev.pulsarconnect.core.ble.BikeTarget
 import dev.pulsarconnect.core.ble.BleService
 import dev.pulsarconnect.core.ble.ConnectionState
+import dev.pulsarconnect.core.ble.ControlProtocol
+import dev.pulsarconnect.core.ble.ClusterControlState
 import dev.pulsarconnect.core.ble.DiscoveredDevice
 
 private enum class PendingBleAction { SCAN, CONNECT }
@@ -216,8 +220,8 @@ internal fun BikeConnectionScreen(
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Text("Battery & signal", fontWeight = FontWeight.Medium)
                                 Text(
-                                    "Experimental and foreground only. Sends only battery level and " +
-                                        "cellular signal. It never sends calls, contacts or messages.",
+                                    "Sends only the verified idle battery/signal frame. " +
+                                        "It never sends calls, contacts or messages.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -383,6 +387,67 @@ internal fun BikeConnectionScreen(
             }
             items(connection.services, key = { it.uuid.toString() }) { service ->
                 ServiceCard(service)
+            }
+            bleState.controlState.frame?.let { frame ->
+                item {
+                    Card(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text(
+                                "CLUSTER CONTROL (read-only diagnostics)",
+                                style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 1.5.sp),
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                            Text(
+                                "The cluster's CONTROL characteristic is polled every 700 ms. " +
+                                    "Values are counters only; this app performs no actions.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("Volume", style = MaterialTheme.typography.bodySmall)
+                                    Text("${frame.volume}", style = MaterialTheme.typography.bodyMedium)
+                                }
+                                Column(Modifier.weight(1f)) {
+                                    Text("Call accept", style = MaterialTheme.typography.bodySmall)
+                                    Text("${frame.callAccept}", style = MaterialTheme.typography.bodyMedium)
+                                }
+                                Column(Modifier.weight(1f)) {
+                                    Text("Call reject", style = MaterialTheme.typography.bodySmall)
+                                    Text("${frame.callReject}", style = MaterialTheme.typography.bodyMedium)
+                                }
+                                Column(Modifier.weight(1f)) {
+                                    Text("Next track", style = MaterialTheme.typography.bodySmall)
+                                    Text("${frame.next}", style = MaterialTheme.typography.bodyMedium)
+                                }
+                            }
+                            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("Previous track", style = MaterialTheme.typography.bodySmall)
+                                    Text("${frame.previous}", style = MaterialTheme.typography.bodyMedium)
+                                }
+                                Column(Modifier.weight(1f)) {
+                                    Text("Play/pause", style = MaterialTheme.typography.bodySmall)
+                                    Text("${if (frame.resume > 0) 1 else 0} / ${if (frame.pause > 0) 1 else 0}", style = MaterialTheme.typography.bodyMedium)
+                                }
+                                Column(Modifier.weight(1f)) {
+                                    Text("Missed-call read", style = MaterialTheme.typography.bodySmall)
+                                    Text("${frame.missedCallRead}", style = MaterialTheme.typography.bodyMedium)
+                                }
+                                Column(Modifier.weight(1f)) {
+                                    Text("Alert read", style = MaterialTheme.typography.bodySmall)
+                                    Text("${frame.alertRead}", style = MaterialTheme.typography.bodyMedium)
+                                }
+                            }
+                            Text(
+                                "Polling: ${if (bleState.controlState.polling) "on" else "off"} · " +
+                                    "Response size: ${ControlProtocol.RESPONSE_SIZE} bytes",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
             }
         }
     }

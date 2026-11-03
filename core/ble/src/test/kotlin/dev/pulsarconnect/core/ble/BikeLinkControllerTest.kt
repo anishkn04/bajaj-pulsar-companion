@@ -1,0 +1,301 @@
+package dev.pulsarconnect.core.ble
+
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+
+@OptIn(ExperimentalCoroutinesApi::class)
+class BikeLinkControllerTest {
+
+    private val vin = "MD2ABCDEFGH123456"
+    private val otherVin = "MD2ABCDEFGH654321"
+    private val target = testTarget(vin = vin)
+    private val fake = FakeBleTransport()
+    private val devices = InMemoryBikeDeviceStore()
+    private val statuses = MutableStateFlow(PhoneStatus(50, 2))
+
+    private fun kotlinx.coroutines.test.TestScope.controller(
+        preferences: BikeLinkPreferences = InMemoryBikeLinkPreferences(
+            BikeLinkSettings(mirroring = false, keepInBackground = false, startOnBoot = false),
+        ),
+    ): Pair<BikeLinkController, BikeConnection> {
+        fake.services = listOf(
+            BleService(
+                PhoneStatusProtocol.SERVICE_UUID,
+                listOf(
+                    BleCharacteristic(
+                        PhoneStatusProtocol.GENERAL_UUID,
+                        canRead = true,
+                        canWrite = true,
+                        canNotify = false,
+                        canIndicate = false,
+                    ),
+                ),
+            ),
+            BleService(
+                ControlProtocol.SERVICE_UUID,
+                listOf(
+                    BleCharacteristic(
+                        ControlProtocol.CONTROL_UUID,
+                        canRead = true,
+                        canWrite = false,
+                        canNotify = false,
+                        canIndicate = false,
+                    ),
+                ),
+            ),
+        )
+        fake.readResponse = ByteArray(ControlProtocol.RESPONSE_SIZE)
+        val connection = BikeConnection(fake, backgroundScope, jitter = { it })
+        val controller = BikeLinkController(
+            devices = devices,
+            connection = connection,
+            preferences = preferences,
+            statuses = statuses,
+            scope = backgroundScope,
+        )
+        return controller to connection
+    }
+
+    private fun writes(): Int = fake.latestSession.writes.size
+
+    @Test
+    fun `nothing connects or sends until the rider opts in`() = runTest {
+        devices.select(target)
+        val (controller, _) = controller()
+
+        controller.onSession(vin)
+        runCurrent()
+
+        assertEquals(0, fake.connectCalls)
+        assertTrue(controller.state.value.connection is ConnectionState.Idle)
+        assertFalse(controller.state.value.settings.mirroring)
+        assertFalse(controller.state.value.mirroringActive)
+    }
+
+    @Test
+    fun `enabling mirroring connects the selected bike and starts sending`() = runTest {
+        devices.select(target)
+        val (controller, _) = controller()
+        controller.onSession(vin)
+
+        controller.setMirroring(true)
+        advanceTimeBy(1_001)
+        runCurrent()
+
+        assertEquals(1, fake.connectCalls)
+        assertTrue(controller.state.value.connection is ConnectionState.Connected)
+        assertTrue(controller.state.value.mirroringActive)
+        assertTrue(writes() >= 2)
+        assertTrue(controller.controlState.value.polling)
+    }
+
+    @Test
+    fun `enabling mirroring without a selected bike stays armed but disconnected`() = runTest {
+        val (controller, _) = controller()
+        controller.onSession(vin)
+
+        controller.setMirroring(true)
+        runCurrent()
+
+        assertEquals(0, fake.connectCalls)
+        assertTrue(controller.state.value.settings.mirroring)
+        assertFalse(controller.state.value.mirroringActive)
+    }
+
+    @Test
+    fun `background mode keeps the link alive`() = runTest {
+        devices.select(target)
+        val (controller, _) = controller()
+        controller.onSession(vin)
+        controller.setMirroring(true)
+        controller.setKeepInBackground(true)
+        advanceTimeBy(1_001)
+        runCurrent()
+
+        controller.onBackground()
+        runCurrent()
+
+        assertTrue(controller.state.value.connection is ConnectionState.Connected)
+        assertTrue(controller.state.value.mirroringActive)
+    }
+
+    @Test
+    fun `without background mode leaving the app stops the link but keeps the intent`() = runTest {
+        devices.select(target)
+        val (controller, _) = controller()
+        controller.onSession(vin)
+        controller.setMirroring(true)
+        runCurrent()
+
+        controller.onBackground()
+        runCurrent()
+
+        assertEquals(ConnectionState.Idle, controller.state.value.connection)
+        assertFalse(controller.state.value.mirroringActive)
+        assertTrue(controller.state.value.settings.mirroring)
+    }
+
+    @Test
+    fun `a remote disconnect keeps mirroring armed and resumes on the next link`() = runTest {
+        devices.select(target)
+        val (controller, _) = controller()
+        controller.onSession(vin)
+        controller.setMirroring(true)
+        runCurrent()
+        assertEquals(1, fake.connectCalls)
+
+        fake.latestSession.disconnect()
+        advanceTimeBy(1_001)
+        runCurrent()
+
+        assertEquals(2, fake.connectCalls)
+        assertTrue(controller.state.value.connection is ConnectionState.Connected)
+        assertTrue(controller.state.value.settings.mirroring)
+        assertTrue(controller.state.value.mirroringActive)
+    }
+
+    @Test
+    fun `switching vin disarms mirroring and closes the old bike`() = runTest {
+        devices.select(target)
+        val (controller, _) = controller()
+        controller.onSession(vin)
+        controller.setMirroring(true)
+        runCurrent()
+        val oldSession = fake.latestSession
+
+        controller.onSession(otherVin)
+        runCurrent()
+
+        assertFalse(controller.state.value.settings.mirroring)
+        assertEquals(ConnectionState.Idle, controller.state.value.connection)
+        assertTrue(oldSession.closed)
+        assertEquals(otherVin, controller.state.value.vin)
+    }
+
+    @Test
+    fun `sign out disarms mirroring and clears the armed vin`() = runTest {
+        devices.select(target)
+        val preferences = InMemoryBikeLinkPreferences()
+        val (controller, _) = controller(preferences)
+        controller.onSession(vin)
+        controller.setMirroring(true)
+        controller.setKeepInBackground(true)
+        runCurrent()
+
+        controller.signOut()
+        runCurrent()
+
+        assertNull(controller.state.value.vin)
+        assertFalse(preferences.settings.value.mirroring)
+        assertNull(preferences.settings.value.armedVin)
+        assertEquals(ConnectionState.Idle, controller.state.value.connection)
+    }
+
+    @Test
+    fun `disconnect turns mirroring off`() = runTest {
+        devices.select(target)
+        val (controller, _) = controller()
+        controller.onSession(vin)
+        controller.setMirroring(true)
+        runCurrent()
+
+        controller.disconnect()
+        runCurrent()
+
+        assertFalse(controller.state.value.settings.mirroring)
+        assertEquals(ConnectionState.Idle, controller.state.value.connection)
+        assertFalse(controller.state.value.mirroringActive)
+    }
+
+    @Test
+    fun `a write failure stops sending but leaves mirroring armed for the next link`() = runTest {
+        devices.select(target)
+        val (controller, _) = controller()
+        controller.onSession(vin)
+        controller.setMirroring(true)
+        runCurrent()
+        fake.latestSession.writeAction = {
+            throw BleException(BleFailure.GattError("writeCharacteristic", 133))
+        }
+        advanceTimeBy(1_000)
+        runCurrent()
+
+        assertFalse(controller.state.value.mirroringActive)
+        assertTrue(controller.state.value.settings.mirroring)
+        assertEquals(BikeLinkController.MIRRORING_STOPPED_MESSAGE, controller.state.value.mirroringError)
+    }
+
+    @Test
+    fun `ensure running adopts the armed vin after a process restart`() = runTest {
+        devices.select(target)
+        val preferences = InMemoryBikeLinkPreferences(
+            BikeLinkSettings(
+                mirroring = true,
+                keepInBackground = true,
+                startOnBoot = true,
+                armedVin = vin,
+            ),
+        )
+        val (controller, _) = controller(preferences)
+
+        controller.ensureRunning()
+        runCurrent()
+
+        assertEquals(vin, controller.state.value.vin)
+        assertEquals(1, fake.connectCalls)
+        assertTrue(controller.state.value.mirroringActive)
+    }
+
+    @Test
+    fun `ensure running does nothing when mirroring is off`() = runTest {
+        devices.select(target)
+        val preferences = InMemoryBikeLinkPreferences(
+            BikeLinkSettings(mirroring = false, armedVin = vin),
+        )
+        val (controller, _) = controller(preferences)
+
+        controller.ensureRunning()
+        runCurrent()
+
+        assertEquals(0, fake.connectCalls)
+        assertTrue(controller.state.value.connection is ConnectionState.Idle)
+    }
+
+    @Test
+    fun `auto connect alone keeps the existing foreground behaviour`() = runTest {
+        devices.select(target)
+        devices.setAutoConnect(vin, true)
+        val (controller, _) = controller()
+        controller.onSession(vin)
+        controller.onForeground()
+        runCurrent()
+
+        assertEquals(1, fake.connectCalls)
+        assertTrue(controller.state.value.connection is ConnectionState.Connected)
+        assertFalse(controller.state.value.mirroringActive)
+    }
+
+    @Test
+    fun `control polling stops when mirroring is disabled`() = runTest {
+        devices.select(target)
+        val (controller, _) = controller()
+        controller.onSession(vin)
+        controller.setMirroring(true)
+        runCurrent()
+        assertTrue(controller.controlState.value.polling)
+
+        controller.setMirroring(false)
+        runCurrent()
+
+        assertFalse(controller.controlState.value.polling)
+    }
+}

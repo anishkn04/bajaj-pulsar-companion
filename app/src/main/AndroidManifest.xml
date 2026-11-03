@@ -6,6 +6,12 @@
     <!-- Optional: only used for the opt-in cellular signal reading, never calls or contacts. -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
 
+    <!-- Foreground service that keeps the bike link alive while mirroring is on. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <!-- Restart the link after reboot when background mode is on. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
     <!-- BLE: nearby-device permissions on API 31+, legacy location on API 26-30. -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
@@ -35,6 +41,23 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Keeps the bike link alive while mirroring is on. `connectedDevice` because the
+             phone is a BLE client to the bike. Stopped by the app when mirroring turns off. -->
+        <service
+            android:name=".ble.BikeLinkService"
+            android:foregroundServiceType="connectedDevice"
+            android:exported="false" />
+
+        <!-- Resumes the link after reboot when background mode + boot resume are on. -->
+        <receiver
+            android:name=".ble.BootReceiver"
+            android:exported="false"
+            android:permission="android.permission.RECEIVE_BOOT_COMPLETED">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>

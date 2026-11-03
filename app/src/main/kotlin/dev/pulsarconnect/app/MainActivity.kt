@@ -29,7 +29,7 @@ class MainActivity : ComponentActivity() {
                     factory = AppViewModel.factory(container),
                 )
                 val bleViewModel: BleViewModel = viewModel(
-                    factory = BleViewModel.factory(container),
+                    factory = container.bleViewModelFactory,
                 )
                 PulsarConnectApp(viewModel, bleViewModel)
             }

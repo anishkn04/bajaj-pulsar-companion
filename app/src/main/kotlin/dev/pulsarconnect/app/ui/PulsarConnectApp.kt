@@ -1,5 +1,11 @@
 package dev.pulsarconnect.app.ui
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.provider.Settings
+import androidx.core.content.ContextCompat
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -32,6 +38,7 @@ import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Switch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -43,6 +50,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -96,6 +104,7 @@ private fun SignedInScreen(
     val latestState by rememberUpdatedState(state)
 
     LaunchedEffect(state.vin) { bleViewModel.onSession(state.vin) }
+    LaunchedEffect(state.vin) { bleViewModel.ensureRunning() }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -163,9 +172,19 @@ private fun SignedInScreen(
                     onRetry = bleViewModel::retry,
                     onAutoConnectChange = bleViewModel::setAutoConnect,
                     onClearSelection = bleViewModel::clearSelection,
-                    onPhoneStatusChange = bleViewModel::setPhoneStatusEnabled,
+                    onPhoneStatusChange = bleViewModel::setMirroring,
                     onRefresh = bleViewModel::refreshPlatformState,
                     onClearError = bleViewModel::clearError,
+                    onBack = { tab = "home" },
+                )
+                "settings" -> SettingsScreen(
+                    state = state,
+                    bleState = bleState,
+                    onMirroringChange = bleViewModel::setMirroring,
+                    onBackgroundChange = bleViewModel::setKeepInBackground,
+                    onBootChange = bleViewModel::setStartOnBoot,
+                    onStopMirroring = { bleViewModel.disconnect(); tab = "home" },
+                    onOpenBatteryOptimization = { tab = "home" },
                     onBack = { tab = "home" },
                 )
                 else -> HomeScreen(
@@ -180,6 +199,172 @@ private fun SignedInScreen(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun SettingsScreen(
+    state: UiState.SignedIn,
+    bleState: BleUiState,
+    onMirroringChange: (Boolean) -> Unit,
+    onBackgroundChange: (Boolean) -> Unit,
+    onBootChange: (Boolean) -> Unit,
+    onStopMirroring: () -> Unit,
+    onOpenBatteryOptimization: () -> Unit,
+    onBack: () -> Unit,
+) {
+    val context = LocalContext.current
+    val settings = bleState.controlState // not used directly; kept for future diagnostics
+    val notificationGranted = ContextCompat.checkSelfPermission(
+        context,
+        Manifest.permission.POST_NOTIFICATIONS,
+    ) == PackageManager.PERMISSION_GRANTED
+    val backgroundOn = bleState.connection is dev.pulsarconnect.core.ble.ConnectionState.Connected ||
+        state.vin != null
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .safeDrawingPadding()
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
+    ) {
+        TextButton(onClick = onBack) { Text("Back to home") }
+        Text("Settings", style = MaterialTheme.typography.headlineLarge)
+
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(
+                    "Bike link mirroring",
+                    style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 1.5.sp),
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("Mirror phone status to cluster", fontWeight = FontWeight.Medium)
+                        Text(
+                            "Sends only the verified idle battery/signal frame. " +
+                                "Never calls, contacts or messages.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = bleState.settings.mirroring,
+                        onCheckedChange = onMirroringChange,
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("Keep mirroring in background", fontWeight = FontWeight.Medium)
+                        Text(
+                            "Uses a foreground service so mirroring survives " +
+                                "leaving the app. Stops when you turn mirroring off.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = bleState.settings.keepInBackground,
+                        onCheckedChange = onBackgroundChange,
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("Resume mirroring after reboot", fontWeight = FontWeight.Medium)
+                        Text(
+                            "Only active when mirroring and background mode are both on " +
+                                "and a bike is selected.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = bleState.settings.startOnBoot,
+                        onCheckedChange = onBootChange,
+                    )
+                }
+                if (bleState.settings.keepInBackground && !notificationGranted) {
+                    Card(
+                        Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer,
+                        ),
+                    ) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                "Notification permission is off",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                            )
+                            Text(
+                                "The foreground service still runs, but you won't see its " +
+                                    "notification. Grant it to keep the stop control visible.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                            )
+                            Button(onClick = {
+                                val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                    putExtra(
+                                        Settings.EXTRA_APP_PACKAGE,
+                                        context.packageName,
+                                    )
+                                }
+                                if (intent.resolveActivity(context.packageManager) != null) {
+                                    context.startActivity(intent)
+                                }
+                            }) { Text("Grant notification permission") }
+                        }
+                    }
+                }
+                if (bleState.settings.mirroring) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        Button(onClick = onStopMirroring) {
+                            Text("Stop mirroring now")
+                        }
+                    }
+                }
+            }
+        }
+
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "Battery optimization",
+                    style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 1.5.sp),
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    "If mirroring stops shortly after you leave the app, add Pulsar Connect to " +
+                        "the battery-optimization exempt list so the foreground service is not killed.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Button(onClick = onOpenBatteryOptimization) {
+                    Text("Open battery settings")
+                }
+            }
+        }
+
+        Text(
+            "Mirroring, background mode and boot resume are global preferences. " +
+                "They are not vehicle-specific and never store credentials, tokens or captures.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

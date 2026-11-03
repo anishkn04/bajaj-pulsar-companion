@@ -15,6 +15,7 @@ class FakeBleTransport : BleTransport {
     var servicesDelayMillis: Long = 0
     var servicesFailure: Throwable? = null
     var servicesAction: (suspend () -> List<BleService>)? = null
+    var readResponse: ByteArray = ByteArray(0)
 
     val sessions = mutableListOf<FakeBleSession>()
     var connectCalls: Int = 0
@@ -53,7 +54,12 @@ class FakeBleSession(
 
     override suspend fun setNotifications(service: UUID, characteristic: UUID, enabled: Boolean) = Unit
 
-    override suspend fun read(service: UUID, characteristic: UUID): ByteArray = ByteArray(0)
+    val reads = mutableListOf<Pair<UUID, UUID>>()
+
+    override suspend fun read(service: UUID, characteristic: UUID): ByteArray {
+        reads += service to characteristic
+        return transport.readResponse.copyOf()
+    }
 
     var negotiatedMtu: Int = PhoneStatusProtocol.PREFERRED_MTU
     var mtuFailure: Throwable? = null

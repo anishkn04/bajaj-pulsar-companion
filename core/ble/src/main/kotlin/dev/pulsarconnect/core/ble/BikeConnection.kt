@@ -152,6 +152,25 @@ class BikeConnection(
         return isCurrent()
     }
 
+    /**
+     * Reads the cluster's CONTROL characteristic without acting on it. Returns null when the
+     * link is not connected, the peer does not expose CONTROL, or the response is too short.
+     */
+    suspend fun readClusterControls(): ClusterControlFrame? {
+        currentCoroutineContext().ensureActive()
+        val version = generation
+        val connected = _state.value as? ConnectionState.Connected ?: return null
+        val activeSession = session ?: return null
+        fun isCurrent(): Boolean = version == generation && session === activeSession &&
+            _state.value === connected
+        if (!ControlProtocol.isSupportedBy(connected.services)) return null
+        if (!isCurrent()) return null
+        val bytes = activeSession.read(ControlProtocol.SERVICE_UUID, ControlProtocol.CONTROL_UUID)
+        currentCoroutineContext().ensureActive()
+        if (!isCurrent()) return null
+        return ControlProtocol.parse(bytes)
+    }
+
     private fun cancelRun() {
         generation++
         job?.cancel()
