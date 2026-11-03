@@ -82,13 +82,24 @@ class AppContainer(context: Context) {
 
     val bikeLinkRuntime: BikeLinkRuntime = object : BikeLinkRuntime {
         override fun setEnabled(enabled: Boolean) {
+            val settings = bikeLinkPreferences.settings.value
+            // Only keep the foreground service running when mirroring is active, background mode
+            // is on, and a bike is armed. Otherwise the view model's own scope holds the link
+            // while the app is in the foreground, and stopping the service avoids an unnecessary
+            // persistent notification.
+            val shouldRun = enabled && settings.runsInBackground && settings.armedVin != null
             val intent = Intent(context.applicationContext, BikeLinkService::class.java).apply {
-                action = if (enabled) BikeLinkService.ACTION_START else BikeLinkService.ACTION_STOP
+                action = if (shouldRun) BikeLinkService.ACTION_START else BikeLinkService.ACTION_STOP
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.applicationContext.startForegroundService(intent)
+            if (shouldRun) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.applicationContext.startForegroundService(intent)
+                } else {
+                    context.applicationContext.startService(intent)
+                }
+                bikeLinkController.ensureRunning()
             } else {
-                context.applicationContext.startService(intent)
+                context.applicationContext.stopService(intent)
             }
         }
     }

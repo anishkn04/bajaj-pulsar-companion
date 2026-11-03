@@ -62,6 +62,10 @@ class BikeLinkService : Service() {
                 controller = app.container.bikeLinkController
                 preferences = app.container.bikeLinkPreferences
                 attach()
+                // (Re)attach to the armed bike after boot or a process restart. The controller's
+                // existing connect-with-response logic handles the actual connection; this service
+                // only keeps the process alive while mirroring is on.
+                controller.ensureRunning()
                 startForeground(Companion.NOTIFICATION_ID, buildNotification())
             }
             action == Companion.ACTION_STOP -> {
