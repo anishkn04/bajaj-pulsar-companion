@@ -7,6 +7,7 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.pulsarconnect.app.ble.BleViewModel
 import dev.pulsarconnect.app.ui.AppViewModel
 import dev.pulsarconnect.app.ui.PulsarConnectApp
 import dev.pulsarconnect.app.ui.theme.PulsarTheme
@@ -27,7 +28,10 @@ class MainActivity : ComponentActivity() {
                 val viewModel: AppViewModel = viewModel(
                     factory = AppViewModel.factory(container),
                 )
-                PulsarConnectApp(viewModel)
+                val bleViewModel: BleViewModel = viewModel(
+                    factory = BleViewModel.factory(container),
+                )
+                PulsarConnectApp(viewModel, bleViewModel)
             }
         }
     }

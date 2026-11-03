@@ -19,6 +19,7 @@ rootProject.name = "pulsar-connect"
 include(":core:model")
 include(":core:session")
 include(":core:network")
+include(":core:ble")
 include(":core:data")
 include(":core:data-jdbc")
 include(":app")

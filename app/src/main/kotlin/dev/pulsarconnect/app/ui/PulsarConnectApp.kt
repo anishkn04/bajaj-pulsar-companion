@@ -33,6 +33,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,12 +51,22 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.pulsarconnect.app.ble.BleUiState
+import dev.pulsarconnect.app.ble.BleViewModel
+import dev.pulsarconnect.core.ble.ConnectionState
 import dev.pulsarconnect.core.data.isDue
 
 @Composable
-fun PulsarConnectApp(viewModel: AppViewModel) {
+fun PulsarConnectApp(viewModel: AppViewModel, bleViewModel: BleViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+
+    LaunchedEffect(state) {
+        if (state !is UiState.SignedIn) bleViewModel.signOut()
+    }
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -68,16 +79,37 @@ fun PulsarConnectApp(viewModel: AppViewModel) {
                 busy = current.busy,
                 onSignIn = viewModel::signIn,
             )
-            is UiState.SignedIn -> SignedInScreen(current, viewModel)
+            is UiState.SignedIn -> SignedInScreen(current, viewModel, bleViewModel)
         }
     }
 }
 
 @Composable
-private fun SignedInScreen(state: UiState.SignedIn, viewModel: AppViewModel) {
+private fun SignedInScreen(
+    state: UiState.SignedIn,
+    viewModel: AppViewModel,
+    bleViewModel: BleViewModel,
+) {
+    val bleState by bleViewModel.state.collectAsStateWithLifecycle()
     var tab by rememberSaveable(state.vin) { mutableStateOf("home") }
     val snackbarHostState = remember(state.vin) { SnackbarHostState() }
     val latestState by rememberUpdatedState(state)
+
+    LaunchedEffect(state.vin) { bleViewModel.onSession(state.vin) }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> bleViewModel.onForeground()
+                Lifecycle.Event.ON_STOP -> bleViewModel.onBackground()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     LaunchedEffect(state.vin, state.error, state.localLoadFailed) {
         state.error?.let { error ->
             val result = snackbarHostState.showSnackbar(
@@ -122,11 +154,27 @@ private fun SignedInScreen(state: UiState.SignedIn, viewModel: AppViewModel) {
                     onNotificationsEnabledChange = viewModel::setReminderNotificationsEnabled,
                     onNotificationsRefresh = viewModel::refreshReminderNotifications,
                 )
+                "bike" -> BikeConnectionScreen(
+                    bleState = bleState,
+                    onScan = bleViewModel::scan,
+                    onSelect = bleViewModel::select,
+                    onConnect = bleViewModel::connect,
+                    onDisconnect = bleViewModel::disconnect,
+                    onRetry = bleViewModel::retry,
+                    onAutoConnectChange = bleViewModel::setAutoConnect,
+                    onClearSelection = bleViewModel::clearSelection,
+                    onPhoneStatusChange = bleViewModel::setPhoneStatusEnabled,
+                    onRefresh = bleViewModel::refreshPlatformState,
+                    onClearError = bleViewModel::clearError,
+                    onBack = { tab = "home" },
+                )
                 else -> HomeScreen(
                     state = state,
+                    bleState = bleState,
                     onSignOut = viewModel::signOut,
                     onTrips = { tab = "trips" },
                     onReminders = { tab = "reminders" },
+                    onBike = { tab = "bike" },
                     onClearError = viewModel::clearError,
                     onRetry = viewModel::retryLocalRecords,
                 )
@@ -231,7 +279,7 @@ private fun LoginScreen(
 
         Text(
             text = "Log in to keep a manual trip log and service reminders on this phone. " +
-                "Saved records are available offline; no Bluetooth or cloud sync is provided.",
+                "Saved records are available offline; Bluetooth is only used for the bike link.",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -316,9 +364,11 @@ private fun LoginScreen(
 @Composable
 private fun HomeScreen(
     state: UiState.SignedIn,
+    bleState: BleUiState,
     onSignOut: () -> Unit,
     onTrips: () -> Unit,
     onReminders: () -> Unit,
+    onBike: () -> Unit,
     onClearError: () -> Unit,
     onRetry: () -> Unit,
 ) {
@@ -352,10 +402,17 @@ private fun HomeScreen(
 
         LocalDataStatus(state, onClearError, onRetry)
         StatusCard(
+            title = "Bike link",
+            value = bleStatusValue(bleState.connection),
+            detail = bleStatusDetail(bleState),
+            actionLabel = "Open bike link",
+            onAction = onBike,
+        )
+        StatusCard(
             title = "Trips",
             value = "${state.trips.size}${if (state.hasMoreTrips) "+" else ""} saved trips",
             detail = if (state.activeTrip != null) "A manual trip is in progress."
-                else "Manually record start and end odometer readings. Local only; no BLE or cloud sync.",
+                else "Manually record start and end odometer readings. Local only; live cluster data is not decoded yet.",
             actionLabel = "View trips",
             onAction = onTrips,
         )
@@ -420,5 +477,32 @@ private fun StatusCard(
             )
             TextButton(onClick = onAction) { Text(actionLabel) }
         }
+    }
+}
+
+internal fun bleStatusValue(connection: ConnectionState): String = when (connection) {
+    ConnectionState.Idle -> "Not connected"
+    ConnectionState.BluetoothUnavailable -> "Bluetooth off"
+    is ConnectionState.MissingPermissions -> "Permission needed"
+    is ConnectionState.Connecting, is ConnectionState.Discovering -> "Connecting…"
+    is ConnectionState.Connected -> "Connected"
+    is ConnectionState.Reconnecting -> "Reconnecting…"
+    is ConnectionState.Failed -> "Connection failed"
+}
+
+internal fun bleStatusDetail(state: BleUiState): String = when (val connection = state.connection) {
+    is ConnectionState.Connected -> connection.services.size.let { count ->
+        val target = connection.target.name ?: "Your bike"
+        val mirroring = if (state.phoneStatusEnabled) " Battery & signal mirroring is on." else ""
+        "$target · $count GATT service${if (count == 1) "" else "s"} discovered.$mirroring"
+    }
+    is ConnectionState.Failed -> connection.reason.toString()
+    ConnectionState.BluetoothUnavailable -> "Turn on Bluetooth, then open the bike link."
+    is ConnectionState.MissingPermissions -> "Grant nearby-device access to scan for your bike."
+    else -> if (state.selected != null) {
+        val name = state.selected.name ?: "Selected bike"
+        if (state.autoConnect) "$name · auto-connect is on." else "$name · auto-connect is off."
+    } else {
+        "Scan for your bike and keep its link across launches. No cluster data is decoded yet."
     }
 }

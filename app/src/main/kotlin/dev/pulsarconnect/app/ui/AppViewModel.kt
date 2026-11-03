@@ -48,6 +48,7 @@ class AppViewModel(
             api.vehicles(requireNotNull(stored.session.userToken) { "Missing vehicle token" })
         }
     },
+    private val onSignedOut: () -> Unit = {},
 ) : ViewModel() {
     private val _state = MutableStateFlow<UiState>(UiState.Loading)
     val state = _state.asStateFlow()
@@ -311,6 +312,11 @@ class AppViewModel(
 
     fun signOut() {
         if (_state.value !is UiState.SignedIn) return
+        try {
+            onSignedOut()
+        } catch (_: Exception) {
+            // Stopping the BLE connection is best effort; signing out must still proceed.
+        }
         val alertCleanupFailed = try {
             notificationActions.onSignedOut()
             false
@@ -355,6 +361,7 @@ class AppViewModel(
                 container.sessionManager, container.api,
                 container.database.bikes, container.database.trips, container.database.reminders,
                 notificationActions = container.reminderNotifications,
+                onSignedOut = container.bikeConnection::stop,
             ) as T
         }
     }
