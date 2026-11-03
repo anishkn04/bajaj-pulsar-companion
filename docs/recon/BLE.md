@@ -7,23 +7,59 @@ The app has a deliberately small, verified Bluetooth foundation:
 - connect, discover and display raw GATT services/characteristics;
 - remember the selection and auto-connect on app foreground when enabled;
 - reconnect with backoff after an unexpected disconnect;
-- opt in to mirroring phone battery level and cellular signal to the cluster.
+- opt in to mirroring phone battery level and cellular signal to the cluster;
+- keep mirroring alive in the background via a foreground service;
+- resume mirroring after reboot when background mode and boot resume are on;
+- poll the cluster's CONTROL characteristic read-only for diagnostics.
 
-The link is **foreground-only**. There is no foreground service, background scan or
-background reconnect. Selection and the auto-connect flag are stored app-private
-per VIN. Bluetooth addresses are not logged, exported or backed up.
+Selection and the auto-connect flag are stored app-private per VIN. Bluetooth addresses are
+not logged, exported or backed up.
 
-Phone-status mirroring is **off by default and session-scoped**. Turning it on sends
-only the verified idle battery/signal frame. It stops when the app goes to the
-background, the rider signs out, switches VIN, disconnects, or turns mirroring off.
-Returning to the foreground requires a fresh opt-in. No caller name, phone number,
-contact, call log, SMS or message content is read or transmitted.
+## Mirroring, background mode and boot resume
 
-Switching VINs or signing out stops the old scan and connection and clears its
-scan results. Disabling auto-connect keeps a healthy connection open, but stops
-pending automatic retries and prevents reconnection after the next disconnect.
-Returning to the foreground retries an opted-in connection after Bluetooth or
-permission availability changes.
+Mirroring sends only the verified idle phone-status (battery/signal) frame to the cluster. It
+is **on by default** on a fresh install, but remains **session-scoped**: it stops when the
+rider signs out, switches VIN, disconnects, or turns mirroring off.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| Mirror phone status to cluster | on | Sends the idle battery/signal frame about once per second. |
+| Keep mirroring in background | on | Runs a `connectedDevice` foreground service so mirroring survives leaving the app. |
+| Resume mirroring after reboot | on | Auto-starts the link after boot when mirroring + background are both on and a bike is selected. |
+
+`runsInBackground = mirroring && keepInBackground`. `resumesAfterBoot = startOnBoot && runsInBackground && armedVin != null`. With all defaults on and a bike selected, `resumesAfterBoot` is true.
+
+The foreground service runs only while mirroring is active and background mode is on. It stops when mirroring is turned off, when background mode is turned off, or when the notification stop action is tapped. If notification permission is denied, the service still runs but no notification is shown — an in-app warning appears in Settings.
+
+**Background model:** the `BikeLinkController` is a singleton in the application scope (`AppContainer`), so it outlives any screen. `BikeLinkService` is logic-thin: its `ACTION_START` handler calls `controller.ensureRunning()`, which uses the controller's existing connect-with-response logic. There is no indefinite background retry and no `connectGatt(autoConnect=true)`; after a reboot the link resumes once when the boot receiver starts the service. This is a documented limitation — if the bike is out of range at boot, the link will not keep retrying indefinitely.
+
+Boot resume is handled by `BootReceiver` on `BOOT_COMPLETED`. It starts `BikeLinkService` only when `resumesAfterBoot` is true. The receiver has no `android:permission` attribute; it filters on the boot action in `onReceive`.
+
+## CONTROL polling (read-only diagnostics)
+
+When connected and mirroring is on, the cluster's CONTROL characteristic (`0a10676e-6972-6565-6e69-676e4543544f`) is polled every 700 ms. Each poll is a 20-byte read; the response is 26 bytes. This is **read only** — no actions are transmitted. Values are button counters and are surfaced in the Bike link screen's CONTROL diagnostics card.
+
+CONTROL map (zero-based offsets):
+
+| Offset | Meaning |
+| --- | --- |
+| `[0] & 0x0f` | Volume |
+| `[1]` | Call accept |
+| `[2]` | Call reject |
+| `[3]` | Reject + SMS |
+| `[4] & 0x3f` | Playlist page |
+| `[5]` | Take-me-home |
+| `[6]` | Resume |
+| `[7]` | Pause |
+| `[8]` | Next track |
+| `[9]` | Previous track |
+| `[10]` | Stop |
+| `[11]` | Missed-call read |
+| `[12]` | Alert read |
+| `[13]` | Launch media |
+
+Only verified frames may be transmitted. Caller name, missed-call, alert and turn-by-turn
+frames remain disabled until a live non-idle capture confirms the cluster accepts them.
 
 ## Automated validation
 
@@ -37,9 +73,8 @@ Regression tests cover cancellation cleanup, stale discovery callbacks, permissi
 and adapter changes during reconnect backoff, changing the reconnect preference,
 per-VIN isolation, Android GATT discovery/disconnect handoff, MTU negotiation,
 stale MTU callbacks, oversized-write rejection, battery/signal source permission
-changes, sender cadence/heartbeat wrapping, and opt-in lifecycle stops. Connection
-and service discovery have separate timeouts; Android discovery runs in the
-discovery phase rather than consuming the connection deadline.
+changes, sender cadence/heartbeat wrapping, opt-in lifecycle stops, background
+mirroring defaults, boot resume gating, and service start/stop lifecycle.
 
 These tests use fake transports and Robolectric, not a real motorcycle. They do
 not establish hardware compatibility or validate cluster rendering.
@@ -109,7 +144,7 @@ not transmit them:
   21-50 in the native static analysis.
 
 Those layouts are research notes, not enabled features. Caller names and missed
-calls stay off until a live, non-idle capture confirms the cluster accepts them.
+calls stay off until a live non-idle capture confirms the cluster accepts them.
 
 Live speed/RPM/fuel/gear telemetry is still not established. The capture's ACTION
 characteristic (`0a10676e-6972-6565-6e69-676e4543544f`) returns 26-byte read

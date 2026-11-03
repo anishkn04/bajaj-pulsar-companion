@@ -12,7 +12,8 @@ This is an interoperability research project, not an official Bajaj app. Initial
 - **Service reminders:** create reminders with a due odometer, a calendar date, or both; mark them complete. Either threshold makes a reminder due, whichever comes first.
 - **Optional background alerts:** local WorkManager checks notify you of due reminders, with Android permission/channel controls, persistent duplicate suppression, and sign-out/opt-out cancellation.
 - **Bike link foundation:** scan for nearby BLE devices, remember the selected bike per VIN, connect and inspect raw GATT services, and optionally auto-connect while the app is in the foreground.
-- **Opt-in battery and signal mirroring:** send only the verified idle phone-status frame to the cluster, with MTU-safe writes. Foreground-only, off by default, and session-scoped. No cluster telemetry is decoded yet.
+- **Background mirroring and boot resume:** a `connectedDevice` foreground service keeps the bike link alive when the app is backgrounded; after reboot the link resumes when mirroring, background mode and boot resume are all on and a bike is selected. Mirroring, background and boot are all on by default on a fresh install.
+- **Opt-in battery and signal mirroring:** send only the verified idle phone-status frame to the cluster, with MTU-safe writes. Session-scoped and read-only CONTROL polling for diagnostics. No cluster telemetry is decoded yet.
 - **Per-bike persistence:** Android-native SQLite stores profiles, trips, telemetry records and reminders in app-private storage.
 - **Safe recovery:** failed local reads offer a read-only retry; a failed refresh after a successful save does not invite duplicate writes.
 
@@ -20,17 +21,47 @@ The reminder odometer is a recorded trip reading, **not live vehicle data**. Rem
 
 ## Bike link and phone-status mirroring
 
-The Bluetooth link is **foreground-only**. There is no foreground service, background scan, or background reconnect. Selection and the auto-connect flag are stored app-private per VIN. Bluetooth addresses are never logged, exported, or backed up.
+The Bluetooth link keeps the bike connection alive outside any screen. Selection and the
+auto-connect flag are stored app-private per VIN. Bluetooth addresses are never logged,
+exported, or backed up.
 
-Open **Bike link**, grant Bluetooth access, and pick your bike. Once connected, the screen shows the discovered GATT services and characteristics.
+Open **Bike link**, grant Bluetooth access, and pick your bike. Once connected, the screen
+shows the discovered GATT services and characteristics. Open **Settings** to control mirroring,
+background mode and boot resume.
 
-- **Auto-connect** retries an opted-in connection on app foreground, including after Bluetooth or permission availability changes. Disabling it keeps a healthy connection open but stops pending retries and prevents reconnection after the next disconnect.
-- **Battery & signal** is a separate, off-by-default switch. Turning it on sends a 55-byte idle phone-status write about once per second; the heartbeat wraps from 255 to 0. It stops when the app goes to the background, you sign out, switch VIN, disconnect, or turn the switch off. Returning to the foreground requires a fresh opt-in.
-- The app requests an ATT MTU of 146 before the first long write and requires at least 58 bytes. If the bike cannot negotiate enough space, the app fails the write instead of truncating or inventing chunking.
-- **Battery** needs no permission. **Cellular signal** additionally needs optional phone-state permission; without it, or without telephony support, battery still mirrors and signal is sent as unavailable. The app never reads contacts, call logs, phone numbers, SMS, or message content.
-- A peer that does not expose the writable GENERAL characteristic is shown as incompatible, and nothing is sent.
+- **Mirror phone status to cluster** (on by default): sends a 55-byte idle phone-status write
+  about once per second; the heartbeat wraps from 255 to 0. It stops when you sign out, switch
+  VIN, disconnect, or turn the switch off. Returning to the foreground requires a fresh opt-in
+  if background mode is off.
+- **Keep mirroring in background** (on by default): runs a `connectedDevice` foreground service
+  so mirroring survives leaving the app. Stops when you turn mirroring off. If notification
+  permission is denied, the service still runs but no notification is shown; Settings offers a
+  shortcut to grant it.
+- **Resume mirroring after reboot** (on by default): after reboot, the link resumes when
+  mirroring + background mode + boot resume are all on and a bike is selected. There is no
+  indefinite background retry — if the bike is out of range at boot, the link resumes once and
+  waits for the next foreground or reconnect attempt.
+- **Auto-connect** retries an opted-in connection on app foreground, including after Bluetooth
+  or permission availability changes. Disabling it keeps a healthy connection open but stops
+  pending retries and prevents reconnection after the next disconnect.
+- The app requests an ATT MTU of 146 before the first long write and requires at least 58 bytes.
+  If the bike cannot negotiate enough space, the app fails the write instead of truncating or
+  inventing chunking.
+- **Battery** needs no permission. **Cellular signal** additionally needs optional phone-state
+  permission; without it, or without telephony support, battery still mirrors and signal is sent
+  as unavailable. The app never reads contacts, call logs, phone numbers, SMS, or message
+  content.
+- A peer that does not expose the writable GENERAL characteristic is shown as incompatible, and
+  nothing is sent.
 
-The frame format comes from the official Android APK's native encoder, not its iOS JavaScript path. Only the idle battery/signal subset is enabled. Caller names and missed-call indication are deliberately **disabled** until a live non-idle capture confirms the cluster accepts them; see [the BLE notes](docs/recon/BLE.md).
+Read-only CONTROL polling: when connected and mirroring is on, the cluster's CONTROL
+characteristic is polled every 700 ms (20-byte read, 26-byte response). Button counters are
+shown in the Bike link diagnostics card. No actions are transmitted.
+
+The frame format comes from the official Android APK's native encoder, not its iOS JavaScript
+path. Only the idle battery/signal subset is enabled. Caller names and missed-call indication
+are deliberately **disabled** until a live non-idle capture confirms the cluster accepts them;
+see [the BLE notes](docs/recon/BLE.md).
 
 ## Background service alerts
 
@@ -95,7 +126,7 @@ This does not establish why the official app exhibits the reported login problem
 - **Bluetooth protocol decoding:** live cluster telemetry and automatic trip capture. Blocked on a targeted HCI snoop capture with the bike switched on; see [the BLE capture guide](docs/recon/BLE.md). No protocol is invented here.
 - **Caller and missed-call mirroring:** static frame layouts were recovered, but no live non-idle frames have been captured, so these stay disabled.
 - Cloud trip sync, export/restore and navigation integration.
-- On-device testing with the bike and a connected Android phone. The battery/signal mirror still needs a controlled smoke test on real hardware.
+- On-device testing with the bike and a connected Android phone, including a smoke test of background mirroring and boot resume on real hardware.
 
 ## Contributing
 
