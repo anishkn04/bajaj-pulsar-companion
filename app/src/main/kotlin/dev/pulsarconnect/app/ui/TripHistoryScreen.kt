@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -51,8 +52,8 @@ internal fun TripHistoryScreen(
     val enabled = !state.busy && !state.localLoading && !state.localLoadFailed
     LazyColumn(
         modifier = Modifier.fillMaxSize().safeDrawingPadding().imePadding(),
-        contentPadding = PaddingValues(24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = PaddingValues(28.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp),
     ) {
         item {
             TextButton(onClick = onBack) { Text("Back to home") }
@@ -67,8 +68,11 @@ internal fun TripHistoryScreen(
             )
         }
         item {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Card(
+                Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            ) {
+                Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     Text(
                         if (active == null) "Start a manual trip" else "Trip in progress",
                         style = MaterialTheme.typography.titleLarge,
@@ -114,8 +118,11 @@ internal fun TripHistoryScreen(
 
 @Composable
 private fun TripRecordCard(trip: Trip) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+    ) {
+        Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(formatRecordDateTime(trip.startTime), style = MaterialTheme.typography.titleMedium)
             trip.endTime?.let { Text("Ended ${formatRecordDateTime(it)}") }
             Text("Distance: ${trip.distanceKm?.let { "${formatRecordNumber(it)} km" } ?: "Not recorded"}")

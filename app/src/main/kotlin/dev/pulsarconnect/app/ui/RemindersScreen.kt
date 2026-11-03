@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -63,8 +64,8 @@ internal fun RemindersScreen(
     val completed = state.reminders.filter { it.completed }
     LazyColumn(
         modifier = Modifier.fillMaxSize().safeDrawingPadding().imePadding(),
-        contentPadding = PaddingValues(24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = PaddingValues(28.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp),
     ) {
         item {
             TextButton(onClick = onBack) { Text("Back to home") }
@@ -87,8 +88,11 @@ internal fun RemindersScreen(
             )
         }
         item {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Card(
+                Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            ) {
+                Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     Text("Add reminder", style = MaterialTheme.typography.titleLarge)
                     OutlinedTextField(
                         value = title,
@@ -162,8 +166,11 @@ private fun ReminderRecordCard(
     onComplete: (Long) -> Unit,
 ) {
     val due = reminder.isDue(lastOdometer ?: Double.NaN, now)
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+    ) {
+        Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(reminder.title, style = MaterialTheme.typography.titleMedium)
             Text(
                 when {
