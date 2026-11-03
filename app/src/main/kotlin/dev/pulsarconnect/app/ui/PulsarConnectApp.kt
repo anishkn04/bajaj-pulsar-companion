@@ -29,7 +29,12 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
@@ -64,11 +69,13 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.pulsarconnect.app.R
 import dev.pulsarconnect.app.ble.BleUiState
 import dev.pulsarconnect.app.ble.BleViewModel
 import dev.pulsarconnect.core.ble.ConnectionState
 import dev.pulsarconnect.core.data.isDue
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PulsarConnectApp(viewModel: AppViewModel, bleViewModel: BleViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -93,6 +100,11 @@ fun PulsarConnectApp(viewModel: AppViewModel, bleViewModel: BleViewModel) {
     }
 }
 
+private enum class NavDestination {
+    HOME, BIKE, TRIPS, REMINDERS, SETTINGS
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SignedInScreen(
     state: UiState.SignedIn,
@@ -100,7 +112,7 @@ private fun SignedInScreen(
     bleViewModel: BleViewModel,
 ) {
     val bleState by bleViewModel.state.collectAsStateWithLifecycle()
-    var tab by rememberSaveable(state.vin) { mutableStateOf("home") }
+    var navDestination by rememberSaveable(state.vin) { mutableStateOf(NavDestination.HOME) }
     val snackbarHostState = remember(state.vin) { SnackbarHostState() }
     val latestState by rememberUpdatedState(state)
     val context = LocalContext.current
@@ -140,24 +152,31 @@ private fun SignedInScreen(
             }
         }
     }
-    BackHandler(enabled = tab != "home") { tab = "home" }
+
+    val onBack = { navDestination = NavDestination.HOME }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState, modifier = Modifier.imePadding()) },
     ) { innerPadding ->
-        Box(Modifier.fillMaxSize().padding(innerPadding).consumeWindowInsets(innerPadding)) {
-            when (tab) {
-                "trips" -> TripHistoryScreen(
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .consumeWindowInsets(innerPadding),
+        ) {
+            when (navDestination) {
+                NavDestination.TRIPS -> TripHistoryScreen(
                     state = state,
-                    onBack = { tab = "home" },
+                    onBack = onBack,
                     onStartTrip = viewModel::startTrip,
                     onEndTrip = viewModel::endTrip,
                     onLoadMore = viewModel::loadMoreTrips,
                     onClearError = viewModel::clearError,
                     onRetry = viewModel::retryLocalRecords,
                 )
-                "reminders" -> RemindersScreen(
+                NavDestination.REMINDERS -> RemindersScreen(
                     state = state,
-                    onBack = { tab = "home" },
+                    onBack = onBack,
                     onAddReminder = viewModel::addReminder,
                     onCompleteReminder = viewModel::completeReminder,
                     onClearError = viewModel::clearError,
@@ -165,7 +184,7 @@ private fun SignedInScreen(
                     onNotificationsEnabledChange = viewModel::setReminderNotificationsEnabled,
                     onNotificationsRefresh = viewModel::refreshReminderNotifications,
                 )
-                "bike" -> BikeConnectionScreen(
+                NavDestination.BIKE -> BikeConnectionScreen(
                     bleState = bleState,
                     onScan = bleViewModel::scan,
                     onSelect = bleViewModel::select,
@@ -177,15 +196,15 @@ private fun SignedInScreen(
                     onPhoneStatusChange = bleViewModel::setMirroring,
                     onRefresh = bleViewModel::refreshPlatformState,
                     onClearError = bleViewModel::clearError,
-                    onBack = { tab = "home" },
+                    onBack = onBack,
                 )
-                "settings" -> SettingsScreen(
+                NavDestination.SETTINGS -> SettingsScreen(
                     state = state,
                     bleState = bleState,
                     onMirroringChange = bleViewModel::setMirroring,
                     onBackgroundChange = bleViewModel::setKeepInBackground,
                     onBootChange = bleViewModel::setStartOnBoot,
-                    onStopMirroring = { bleViewModel.disconnect(); tab = "home" },
+                    onStopMirroring = { bleViewModel.disconnect(); navDestination = NavDestination.HOME },
                     onOpenBatteryOptimization = {
                         val intent = Intent().apply {
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -199,20 +218,202 @@ private fun SignedInScreen(
                             context.startActivity(intent)
                         }
                     },
-                    onBack = { tab = "home" },
+                    onBack = onBack,
                 )
                 else -> HomeScreen(
                     state = state,
                     bleState = bleState,
                     onSignOut = viewModel::signOut,
-                    onTrips = { tab = "trips" },
-                    onReminders = { tab = "reminders" },
-                    onBike = { tab = "bike" },
-                    onSettings = { tab = "settings" },
+                    onTrips = { navDestination = NavDestination.TRIPS },
+                    onReminders = { navDestination = NavDestination.REMINDERS },
+                    onBike = { navDestination = NavDestination.BIKE },
+                    onSettings = { navDestination = NavDestination.SETTINGS },
                     onClearError = viewModel::clearError,
                     onRetry = viewModel::retryLocalRecords,
                 )
             }
+        }
+
+        FloatingBottomNavigationBar(
+            selectedDestination = navDestination,
+            onDestinationSelected = { navDestination = it },
+        )
+    }
+}
+
+@Composable
+private fun FloatingBottomNavigationBar(
+    selectedDestination: NavDestination,
+    onDestinationSelected: (NavDestination) -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+    ) {
+        NavigationBar(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        ) {
+            NavigationBarItem(
+                selected = selectedDestination == NavDestination.HOME,
+                onClick = { onDestinationSelected(NavDestination.HOME) },
+                icon = { },
+                label = { Text("Home") },
+            )
+            NavigationBarItem(
+                selected = selectedDestination == NavDestination.BIKE,
+                onClick = { onDestinationSelected(NavDestination.BIKE) },
+                icon = { },
+                label = { Text("Bike link") },
+            )
+            NavigationBarItem(
+                selected = selectedDestination == NavDestination.TRIPS,
+                onClick = { onDestinationSelected(NavDestination.TRIPS) },
+                icon = { },
+                label = { Text("Trips") },
+            )
+            NavigationBarItem(
+                selected = selectedDestination == NavDestination.REMINDERS,
+                onClick = { onDestinationSelected(NavDestination.REMINDERS) },
+                icon = { },
+                label = { Text("Reminders") },
+            )
+            NavigationBarItem(
+                selected = selectedDestination == NavDestination.SETTINGS,
+                onClick = { onDestinationSelected(NavDestination.SETTINGS) },
+                icon = { },
+                label = { Text("Settings") },
+            )
+        }
+    }
+}
+
+@Composable
+private fun HomeScreen(
+    state: UiState.SignedIn,
+    bleState: BleUiState,
+    onSignOut: () -> Unit,
+    onTrips: () -> Unit,
+    onReminders: () -> Unit,
+    onBike: () -> Unit,
+    onSettings: () -> Unit,
+    onClearError: () -> Unit,
+    onRetry: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .safeDrawingPadding()
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
+    ) {
+        Text(
+            text = "PULSAR CONNECT",
+            style = MaterialTheme.typography.labelLarge.copy(letterSpacing = 4.sp),
+            color = MaterialTheme.colorScheme.primary,
+        )
+
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                text = state.bikeName ?: "Your Pulsar",
+                style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = state.vin,
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        LocalDataStatus(state, onClearError, onRetry)
+        ExpressiveCard(
+            title = "Bike link",
+            value = bleStatusValue(bleState.connection),
+            detail = bleStatusDetail(bleState),
+            actionLabel = "Open bike link",
+            onAction = onBike,
+        )
+        ExpressiveCard(
+            title = "Trips",
+            value = "${state.trips.size}${if (state.hasMoreTrips) "+" else ""} saved trips",
+            detail = if (state.activeTrip != null) "A manual trip is in progress."
+                else "Manually record start and end odometer readings. Local only; live cluster data is not decoded yet.",
+            actionLabel = "View trips",
+            onAction = onTrips,
+        )
+        val now = rememberCurrentTimeMillis()
+        val pending = state.reminders.count { !it.completed }
+        val due = state.reminders.count { it.isDue(state.lastOdometer ?: Double.NaN, now) }
+        ExpressiveCard(
+            title = "Reminders",
+            value = "$pending pending · $due due",
+            detail = "Due status uses dates and your latest recorded odometer, not live bike data.",
+            actionLabel = "Manage reminders",
+            onAction = onReminders,
+        )
+        ExpressiveCard(
+            title = "Settings",
+            value = "Mirroring · background · boot",
+            detail = "Keep the bike link alive when the app is backgrounded and resume it after reboot.",
+            actionLabel = "Open settings",
+            onAction = onSettings,
+        )
+
+        Text(
+            "Signing out stops reminder alerts but keeps your alert preference and local trip and reminder data on this phone.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+        ) {
+            TextButton(onClick = onSignOut, enabled = !state.busy) {
+                Text("Sign out", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExpressiveCard(
+    title: String,
+    value: String,
+    detail: String,
+    actionLabel: String,
+    onAction: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = title.uppercase(),
+                style = MaterialTheme.typography.labelLarge.copy(letterSpacing = 1.5.sp),
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                text = value,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = detail,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            TextButton(onClick = onAction) { Text(actionLabel) }
         }
     }
 }
@@ -229,13 +430,10 @@ private fun SettingsScreen(
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
-    val settings = bleState.controlState // not used directly; kept for future diagnostics
     val notificationGranted = ContextCompat.checkSelfPermission(
         context,
         Manifest.permission.POST_NOTIFICATIONS,
     ) == PackageManager.PERMISSION_GRANTED
-    val backgroundOn = bleState.connection is dev.pulsarconnect.core.ble.ConnectionState.Connected ||
-        state.vin != null
 
     Column(
         modifier = Modifier
@@ -248,138 +446,126 @@ private fun SettingsScreen(
         TextButton(onClick = onBack) { Text("Back to home") }
         Text("Settings", style = MaterialTheme.typography.headlineLarge)
 
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text(
-                    "Bike link mirroring",
-                    style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 1.5.sp),
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text("Mirror phone status to cluster", fontWeight = FontWeight.Medium)
-                        Text(
-                            "Sends only the verified idle battery/signal frame. " +
-                                "Never calls, contacts or messages.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Switch(
-                        checked = bleState.settings.mirroring,
-                        onCheckedChange = onMirroringChange,
+        SectionCard(title = "Bike link mirroring") {
+            SwitchRow(
+                title = "Mirror phone status to cluster",
+                description = "Sends only the verified idle battery/signal frame. Never calls, contacts or messages.",
+                checked = bleState.settings.mirroring,
+                onCheckedChange = onMirroringChange,
+            )
+            SwitchRow(
+                title = "Keep mirroring in background",
+                description = "Uses a foreground service so mirroring survives leaving the app. Stops when you turn mirroring off.",
+                checked = bleState.settings.keepInBackground,
+                onCheckedChange = onBackgroundChange,
+            )
+            SwitchRow(
+                title = "Resume mirroring after reboot",
+                description = "Only active when mirroring and background mode are both on and a bike is selected.",
+                checked = bleState.settings.startOnBoot,
+                onCheckedChange = onBootChange,
+            )
+        }
+
+        if (bleState.settings.keepInBackground && !notificationGranted) {
+            Card(
+                Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                ),
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Notification permission is off",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
                     )
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text("Keep mirroring in background", fontWeight = FontWeight.Medium)
-                        Text(
-                            "Uses a foreground service so mirroring survives " +
-                                "leaving the app. Stops when you turn mirroring off.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Switch(
-                        checked = bleState.settings.keepInBackground,
-                        onCheckedChange = onBackgroundChange,
+                    Text(
+                        "The foreground service still runs, but you won't see its notification. Grant it to keep the stop control visible.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
                     )
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text("Resume mirroring after reboot", fontWeight = FontWeight.Medium)
-                        Text(
-                            "Only active when mirroring and background mode are both on " +
-                                "and a bike is selected.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Switch(
-                        checked = bleState.settings.startOnBoot,
-                        onCheckedChange = onBootChange,
-                    )
-                }
-                if (bleState.settings.keepInBackground && !notificationGranted) {
-                    Card(
-                        Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer,
-                        ),
-                    ) {
-                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(
-                                "Notification permission is off",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                            )
-                            Text(
-                                "The foreground service still runs, but you won't see its " +
-                                    "notification. Grant it to keep the stop control visible.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                            )
-                            Button(onClick = {
-                                val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
-                                    putExtra(
-                                        Settings.EXTRA_APP_PACKAGE,
-                                        context.packageName,
-                                    )
-                                }
-                                if (intent.resolveActivity(context.packageManager) != null) {
-                                    context.startActivity(intent)
-                                }
-                            }) { Text("Grant notification permission") }
+                    Button(onClick = {
+                        val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
                         }
-                    }
-                }
-                if (bleState.settings.mirroring) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
-                    ) {
-                        Button(onClick = onStopMirroring) {
-                            Text("Stop mirroring now")
+                        if (intent.resolveActivity(context.packageManager) != null) {
+                            context.startActivity(intent)
                         }
-                    }
+                    }) { Text("Grant notification permission") }
                 }
             }
         }
 
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    "Battery optimization",
-                    style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 1.5.sp),
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                Text(
-                    "If mirroring stops shortly after you leave the app, add Pulsar Connect to " +
-                        "the battery-optimization exempt list so the foreground service is not killed.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Button(onClick = onOpenBatteryOptimization) {
-                    Text("Open battery settings")
-                }
+        if (bleState.settings.mirroring) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                Button(onClick = onStopMirroring) { Text("Stop mirroring now") }
+            }
+        }
+
+        SectionCard(title = "Battery optimization") {
+            Text(
+                "If mirroring stops shortly after you leave the app, add Pulsar Connect to the battery-optimization exempt list so the foreground service is not killed.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(onClick = onOpenBatteryOptimization) {
+                Text("Open battery settings")
             }
         }
 
         Text(
-            "Mirroring, background mode and boot resume are global preferences. " +
-                "They are not vehicle-specific and never store credentials, tokens or captures.",
+            "Mirroring, background mode and boot resume are global preferences. They are not vehicle-specific and never store credentials, tokens or captures.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+@Composable
+private fun SectionCard(title: String, content: @Composable () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(
+                text = title.uppercase(),
+                style = MaterialTheme.typography.labelLarge.copy(letterSpacing = 1.5.sp),
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Medium,
+            )
+            content()
+        }
+    }
+}
+
+@Composable
+private fun SwitchRow(
+    title: String,
+    description: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, fontWeight = FontWeight.Medium)
+            Text(
+                description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
 
@@ -478,8 +664,7 @@ private fun LoginScreen(
         )
 
         Text(
-            text = "Log in to keep a manual trip log and service reminders on this phone. " +
-                "Saved records are available offline; Bluetooth is only used for the bike link.",
+            text = "Log in to keep a manual trip log and service reminders on this phone. Saved records are available offline; Bluetooth is only used for the bike link.",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -558,133 +743,6 @@ private fun LoginScreen(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-    }
-}
-
-@Composable
-private fun HomeScreen(
-    state: UiState.SignedIn,
-    bleState: BleUiState,
-    onSignOut: () -> Unit,
-    onTrips: () -> Unit,
-    onReminders: () -> Unit,
-    onBike: () -> Unit,
-    onSettings: () -> Unit,
-    onClearError: () -> Unit,
-    onRetry: () -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .safeDrawingPadding()
-            .verticalScroll(rememberScrollState())
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp),
-    ) {
-        Text(
-            text = "PULSAR CONNECT",
-            style = MaterialTheme.typography.labelLarge.copy(letterSpacing = 4.sp),
-            color = MaterialTheme.colorScheme.primary,
-        )
-
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(
-                text = state.bikeName ?: "Your Pulsar",
-                style = MaterialTheme.typography.headlineLarge,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = state.vin,
-                style = MaterialTheme.typography.bodyMedium,
-                fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-
-        LocalDataStatus(state, onClearError, onRetry)
-        StatusCard(
-            title = "Bike link",
-            value = bleStatusValue(bleState.connection),
-            detail = bleStatusDetail(bleState),
-            actionLabel = "Open bike link",
-            onAction = onBike,
-        )
-        StatusCard(
-            title = "Trips",
-            value = "${state.trips.size}${if (state.hasMoreTrips) "+" else ""} saved trips",
-            detail = if (state.activeTrip != null) "A manual trip is in progress."
-                else "Manually record start and end odometer readings. Local only; live cluster data is not decoded yet.",
-            actionLabel = "View trips",
-            onAction = onTrips,
-        )
-        val now = rememberCurrentTimeMillis()
-        val pending = state.reminders.count { !it.completed }
-        val due = state.reminders.count { it.isDue(state.lastOdometer ?: Double.NaN, now) }
-        StatusCard(
-            title = "Reminders",
-            value = "$pending pending · $due due",
-            detail = "Due status uses dates and your latest recorded odometer, not live bike data.",
-            actionLabel = "Manage reminders",
-            onAction = onReminders,
-        )
-        StatusCard(
-            title = "Settings",
-            value = "Mirroring · background · boot",
-            detail = "Keep the bike link alive when the app is backgrounded and resume it after reboot.",
-            actionLabel = "Open settings",
-            onAction = onSettings,
-        )
-
-        Text(
-            "Signing out stops reminder alerts but keeps your alert preference and local trip and reminder data on this phone.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End,
-        ) {
-            TextButton(onClick = onSignOut, enabled = !state.busy) {
-                Text("Sign out", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-    }
-}
-
-@Composable
-private fun StatusCard(
-    title: String,
-    value: String,
-    detail: String,
-    actionLabel: String,
-    onAction: () -> Unit,
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Text(
-                text = title.uppercase(),
-                style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 1.5.sp),
-                color = MaterialTheme.colorScheme.primary,
-            )
-            Text(
-                text = value,
-                style = MaterialTheme.typography.titleLarge,
-            )
-            Text(
-                text = detail,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            TextButton(onClick = onAction) { Text(actionLabel) }
-        }
     }
 }
 
