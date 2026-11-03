@@ -39,3 +39,7 @@ Thumbs.db
 # --- Tooling ---
 node_modules/
 .sentryclirc
+
+# --- Local session exports ---
+/past_session.json
+/past_session.md
