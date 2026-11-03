@@ -11,10 +11,26 @@ This is an interoperability research project, not an official Bajaj app. Initial
 - **Manual trip log:** enter start/end odometer readings, resume an unfinished trip after restarting, and browse paginated history with distance and duration.
 - **Service reminders:** create reminders with a due odometer, a calendar date, or both; mark them complete. Either threshold makes a reminder due, whichever comes first.
 - **Optional background alerts:** local WorkManager checks notify you of due reminders, with Android permission/channel controls, persistent duplicate suppression, and sign-out/opt-out cancellation.
+- **Bike link foundation:** scan for nearby BLE devices, remember the selected bike per VIN, connect and inspect raw GATT services, and optionally auto-connect while the app is in the foreground.
+- **Opt-in battery and signal mirroring:** send only the verified idle phone-status frame to the cluster, with MTU-safe writes. Foreground-only, off by default, and session-scoped. No cluster telemetry is decoded yet.
 - **Per-bike persistence:** Android-native SQLite stores profiles, trips, telemetry records and reminders in app-private storage.
 - **Safe recovery:** failed local reads offer a read-only retry; a failed refresh after a successful save does not invite duplicate writes.
 
-The reminder odometer is a recorded trip reading, **not live vehicle data**. Reminder dates use the device's time zone. Trips are manually entered, not automatically captured or synced with Bajaj.
+The reminder odometer is a recorded trip reading, **not live vehicle data**. Reminder dates use the device's time zone. Trips are manually entered, not automatically captured or synced with Bajaj. The Bluetooth screen shows raw GATT services and an experimental, opt-in battery/signal mirror; it does not decode cluster values or create trips.
+
+## Bike link and phone-status mirroring
+
+The Bluetooth link is **foreground-only**. There is no foreground service, background scan, or background reconnect. Selection and the auto-connect flag are stored app-private per VIN. Bluetooth addresses are never logged, exported, or backed up.
+
+Open **Bike link**, grant Bluetooth access, and pick your bike. Once connected, the screen shows the discovered GATT services and characteristics.
+
+- **Auto-connect** retries an opted-in connection on app foreground, including after Bluetooth or permission availability changes. Disabling it keeps a healthy connection open but stops pending retries and prevents reconnection after the next disconnect.
+- **Battery & signal** is a separate, off-by-default switch. Turning it on sends a 55-byte idle phone-status write about once per second; the heartbeat wraps from 255 to 0. It stops when the app goes to the background, you sign out, switch VIN, disconnect, or turn the switch off. Returning to the foreground requires a fresh opt-in.
+- The app requests an ATT MTU of 146 before the first long write and requires at least 58 bytes. If the bike cannot negotiate enough space, the app fails the write instead of truncating or inventing chunking.
+- **Battery** needs no permission. **Cellular signal** additionally needs optional phone-state permission; without it, or without telephony support, battery still mirrors and signal is sent as unavailable. The app never reads contacts, call logs, phone numbers, SMS, or message content.
+- A peer that does not expose the writable GENERAL characteristic is shown as incompatible, and nothing is sent.
+
+The frame format comes from the official Android APK's native encoder, not its iOS JavaScript path. Only the idle battery/signal subset is enabled. Caller names and missed-call indication are deliberately **disabled** until a live non-idle capture confirms the cluster accepts them; see [the BLE notes](docs/recon/BLE.md).
 
 ## Background service alerts
 
@@ -40,7 +56,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 Core tests use JUnit 5. App tests use JUnit 4, Robolectric and WorkManager's test helpers, including native SQLite, notification permission/channel behavior, persistent delivery suppression, sign-out races, and overlapping-work scheduling on API 26 and 35. The first test run needs network access for dependencies and Robolectric's Android SDK jars; Gradle's `--offline` does not control Robolectric's separate SDK resolver. Sandboxed runs also need a writable Java `user.home` for Robolectric's lock/cache, and a writable Gradle cache.
 
-Tests use synthetic credentials and deterministic clocks. No motorcycle or live Bajaj account is needed. BLE/device integration has not been validated by these tests.
+Tests use synthetic credentials and deterministic clocks. No motorcycle or live Bajaj account is needed. The BLE suite additionally covers MTU negotiation, oversized-write rejection, battery/signal source behavior, sender cadence, and the opt-in lifecycle using fake transports and Robolectric. These tests do **not** establish real-bike compatibility or prove how the cluster renders values.
 
 ## Architecture
 
@@ -49,6 +65,7 @@ app/                  Compose screens, ViewModel, Keystore, native SQLiteOpenHel
 core/model/           Domain types: VIN, credentials, session, trips, reminders
 core/session/         Session persistence behind the SecretStore interface
 core/network/         Bajaj API client and authentication orchestration
+core/ble/             Pure-JVM BLE scanning, connection state machine, phone-status protocol and sender
 core/data/            Android-safe repository contracts, shared rules, test doubles
 core/data-jdbc/       Desktop/JVM SQLite adapter and its integration tests
 ```
@@ -61,7 +78,7 @@ Credentials and bearer tokens are encrypted. Bike profiles, trip data, telemetry
 
 Signing out removes saved credentials and tokens but **retains local records per VIN**. Signing back into that VIN shows them again. Clearing app storage or uninstalling removes the local database; there is no export/backup workflow yet. Do not rely on this research app as your only copy of service history.
 
-No analytics or developer-controlled server receives these records. Sign-in and vehicle refresh contact Bajaj. See [the security guide](docs/SECURITY.md).
+No analytics or developer-controlled server receives these records. Sign-in and vehicle refresh contact Bajaj. Battery and signal readings are used only for the opt-in mirror and are not stored. See [the security guide](docs/SECURITY.md).
 
 ## API recovery
 
@@ -75,10 +92,10 @@ This does not establish why the official app exhibits the reported login problem
 
 ## Still planned
 
-- Bluetooth protocol recovery and automatic cluster telemetry/trip capture. Needs a capture with the bike ignition on; no protocol is invented here.
-
+- **Bluetooth protocol decoding:** live cluster telemetry and automatic trip capture. Blocked on a targeted HCI snoop capture with the bike switched on; see [the BLE capture guide](docs/recon/BLE.md). No protocol is invented here.
+- **Caller and missed-call mirroring:** static frame layouts were recovered, but no live non-idle frames have been captured, so these stay disabled.
 - Cloud trip sync, export/restore and navigation integration.
-- On-device testing with the bike and a connected Android phone.
+- On-device testing with the bike and a connected Android phone. The battery/signal mirror still needs a controlled smoke test on real hardware.
 
 ## Contributing
 
