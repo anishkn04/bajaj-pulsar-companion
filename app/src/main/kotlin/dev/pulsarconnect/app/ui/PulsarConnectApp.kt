@@ -380,7 +380,7 @@ private fun HomeScreen(
 }
 
 @Composable
-private fun ExpressiveCard(
+internal fun ExpressiveCard(
     title: String,
     value: String,
     detail: String,
@@ -547,11 +547,12 @@ private fun SectionCard(title: String, content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun SwitchRow(
+internal fun SwitchRow(
     title: String,
     description: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -565,7 +566,7 @@ private fun SwitchRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
     }
 }
 

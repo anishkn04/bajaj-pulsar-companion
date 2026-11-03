@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
@@ -111,8 +112,8 @@ internal fun BikeConnectionScreen(
     val connection = bleState.connection
     LazyColumn(
         modifier = Modifier.fillMaxSize().safeDrawingPadding(),
-        contentPadding = PaddingValues(24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = PaddingValues(28.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp),
     ) {
         item {
             TextButton(onClick = onBack) { Text("Back to home") }
@@ -128,13 +129,11 @@ internal fun BikeConnectionScreen(
         }
 
         item {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        "CONNECTION",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
+            Card(
+                Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -149,6 +148,7 @@ internal fun BikeConnectionScreen(
                             Text(
                                 bleStatusValue(connection),
                                 style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.SemiBold,
                             )
                             Text(
                                 bleStatusDetail(bleState),
@@ -206,70 +206,52 @@ internal fun BikeConnectionScreen(
 
         if (connection is ConnectionState.Connected) {
             item {
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Card(
+                    Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                ) {
+                    SwitchRow(
+                        title = "Battery & signal",
+                        description = "Sends only the verified idle battery/signal frame. It never sends calls, contacts or messages.",
+                        checked = bleState.phoneStatusEnabled,
+                        onCheckedChange = onPhoneStatusChange,
+                        enabled = bleState.phoneStatusAvailable,
+                    )
+                    if (!bleState.phoneStatusAvailable) {
                         Text(
-                            "PHONE STATUS MIRRORING",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
+                            "This bike did not expose the writable phone-status endpoint, so nothing will be sent.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Text("Battery & signal", fontWeight = FontWeight.Medium)
-                                Text(
-                                    "Sends only the verified idle battery/signal frame. " +
-                                        "It never sends calls, contacts or messages.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            Switch(
-                                checked = bleState.phoneStatusEnabled,
-                                enabled = bleState.phoneStatusAvailable,
-                                onCheckedChange = onPhoneStatusChange,
+                    } else {
+                        if (bleState.phoneStatusSending) {
+                            Text(
+                                "Sending battery and signal every second.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
                             )
                         }
-                        if (!bleState.phoneStatusAvailable) {
+                        if (phonePermissionGranted) {
                             Text(
-                                "This bike did not expose the writable phone-status endpoint, " +
-                                    "so nothing will be sent.",
+                                "Phone-state permission is granted; signal appears when the network reports it.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         } else {
-                            if (bleState.phoneStatusSending) {
-                                Text(
-                                    "Sending battery and signal every second.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.primary,
-                                )
-                            }
-                            if (phonePermissionGranted) {
-                                Text(
-                                    "Phone-state permission is granted; signal appears when the network reports it.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            } else {
-                                Text(
-                                    "Battery works without permission. Allow phone state only to mirror " +
-                                        "cellular signal too.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                TextButton(
-                                    onClick = {
-                                        phonePermissionLauncher.launch(Manifest.permission.READ_PHONE_STATE)
-                                    },
-                                ) { Text("Allow signal") }
-                            }
+                            Text(
+                                "Battery works without permission. Allow phone state only to mirror cellular signal too.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            TextButton(
+                                onClick = {
+                                    phonePermissionLauncher.launch(Manifest.permission.READ_PHONE_STATE)
+                                },
+                            ) { Text("Allow signal") }
                         }
-                        bleState.phoneStatusError?.let { message ->
-                            Text(message, color = MaterialTheme.colorScheme.error)
-                        }
+                    }
+                    bleState.phoneStatusError?.let { message ->
+                        Text(message, color = MaterialTheme.colorScheme.error)
                     }
                 }
             }
@@ -277,9 +259,14 @@ internal fun BikeConnectionScreen(
 
         bleState.error?.let { error ->
             item {
-                Card(Modifier.fillMaxWidth()) {
+                Card(
+                    Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                    ),
+                ) {
                     Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(error, color = MaterialTheme.colorScheme.error)
+                        Text(error, color = MaterialTheme.colorScheme.onErrorContainer)
                         TextButton(onClick = onClearError) { Text("Dismiss") }
                     }
                 }
@@ -288,16 +275,15 @@ internal fun BikeConnectionScreen(
 
         bleState.selected?.let { selected ->
             item {
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            "SELECTED BIKE",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
+                Card(
+                    Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
                             selected.name ?: "Unnamed Bluetooth device",
                             style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
                         )
                         Text(
                             selected.id,
@@ -305,23 +291,12 @@ internal fun BikeConnectionScreen(
                             fontFamily = FontFamily.Monospace,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text("Auto-connect", fontWeight = FontWeight.Medium)
-                                Text(
-                                    "Only while this screen is in the foreground.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            Switch(
-                                checked = bleState.autoConnect,
-                                onCheckedChange = onAutoConnectChange,
-                            )
-                        }
+                        SwitchRow(
+                            title = "Auto-connect",
+                            description = "Only while this screen is in the foreground.",
+                            checked = bleState.autoConnect,
+                            onCheckedChange = onAutoConnectChange,
+                        )
                         TextButton(onClick = onClearSelection) { Text("Forget this bike") }
                     }
                 }
@@ -329,13 +304,11 @@ internal fun BikeConnectionScreen(
         }
 
         item {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        "NEARBY DEVICES",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
+            Card(
+                Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
                         "Turn the bike ignition and kill switch on, then scan. " +
                             "Bluetooth addresses stay on this phone and are never exported.",
@@ -371,8 +344,8 @@ internal fun BikeConnectionScreen(
         if (connection is ConnectionState.Connected) {
             item {
                 Text(
-                    "GATT INSPECTOR",
-                    style = MaterialTheme.typography.labelMedium,
+                    "GATT inspector",
+                    style = MaterialTheme.typography.labelLarge.copy(letterSpacing = 1.5.sp),
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
@@ -390,16 +363,13 @@ internal fun BikeConnectionScreen(
             }
             bleState.controlState.frame?.let { frame ->
                 item {
-                    Card(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Card(
+                        Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             Text(
-                                "CLUSTER CONTROL (read-only diagnostics)",
-                                style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 1.5.sp),
-                                color = MaterialTheme.colorScheme.primary,
-                            )
-                            Text(
-                                "The cluster's CONTROL characteristic is polled every 700 ms. " +
-                                    "Values are counters only; this app performs no actions.",
+                                "The cluster's CONTROL characteristic is polled every 700 ms. Values are counters only; this app performs no actions.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -459,7 +429,10 @@ private fun DeviceRow(
     selected: Boolean,
     onSelect: () -> Unit,
 ) {
-    Card(Modifier.fillMaxWidth()) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+    ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -469,6 +442,7 @@ private fun DeviceRow(
                 Text(
                     device.name ?: "Unnamed Bluetooth device",
                     style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
                 )
                 Text(
                     device.id,
@@ -491,11 +465,14 @@ private fun DeviceRow(
 
 @Composable
 private fun ServiceCard(service: BleService) {
-    Card(Modifier.fillMaxWidth()) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+    ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
                 "Service",
-                style = MaterialTheme.typography.labelMedium,
+                style = MaterialTheme.typography.labelLarge.copy(letterSpacing = 1.5.sp),
                 color = MaterialTheme.colorScheme.primary,
             )
             Text(
