@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
 import androidx.core.content.ContextCompat
 import androidx.activity.compose.BackHandler
@@ -102,6 +103,7 @@ private fun SignedInScreen(
     var tab by rememberSaveable(state.vin) { mutableStateOf("home") }
     val snackbarHostState = remember(state.vin) { SnackbarHostState() }
     val latestState by rememberUpdatedState(state)
+    val context = LocalContext.current
 
     LaunchedEffect(state.vin) { bleViewModel.onSession(state.vin) }
     LaunchedEffect(state.vin) { bleViewModel.ensureRunning() }
@@ -184,7 +186,19 @@ private fun SignedInScreen(
                     onBackgroundChange = bleViewModel::setKeepInBackground,
                     onBootChange = bleViewModel::setStartOnBoot,
                     onStopMirroring = { bleViewModel.disconnect(); tab = "home" },
-                    onOpenBatteryOptimization = { tab = "home" },
+                    onOpenBatteryOptimization = {
+                        val intent = Intent().apply {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                action = Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS
+                            } else {
+                                action = Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+                                data = Uri.parse("package:${context.packageName}")
+                            }
+                        }
+                        if (intent.resolveActivity(context.packageManager) != null) {
+                            context.startActivity(intent)
+                        }
+                    },
                     onBack = { tab = "home" },
                 )
                 else -> HomeScreen(
@@ -194,6 +208,7 @@ private fun SignedInScreen(
                     onTrips = { tab = "trips" },
                     onReminders = { tab = "reminders" },
                     onBike = { tab = "bike" },
+                    onSettings = { tab = "settings" },
                     onClearError = viewModel::clearError,
                     onRetry = viewModel::retryLocalRecords,
                 )
@@ -554,6 +569,7 @@ private fun HomeScreen(
     onTrips: () -> Unit,
     onReminders: () -> Unit,
     onBike: () -> Unit,
+    onSettings: () -> Unit,
     onClearError: () -> Unit,
     onRetry: () -> Unit,
 ) {
@@ -610,6 +626,13 @@ private fun HomeScreen(
             detail = "Due status uses dates and your latest recorded odometer, not live bike data.",
             actionLabel = "Manage reminders",
             onAction = onReminders,
+        )
+        StatusCard(
+            title = "Settings",
+            value = "Mirroring · background · boot",
+            detail = "Keep the bike link alive when the app is backgrounded and resume it after reboot.",
+            actionLabel = "Open settings",
+            onAction = onSettings,
         )
 
         Text(
