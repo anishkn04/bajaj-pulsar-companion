@@ -235,6 +235,106 @@ class BikeLinkControllerTest {
     }
 
     @Test
+    fun `foreground retries the last target after a terminal failure`() = runTest {
+        devices.select(target)
+        devices.setAutoConnect(vin, true)
+        fake.connectFailure = BleException(BleFailure.GattError("connect", 133))
+        val (controller, _) = controller()
+        controller.onSession(vin)
+        runCurrent()
+        assertTrue(controller.state.value.connection is ConnectionState.Failed)
+        assertEquals(1, fake.connectCalls)
+
+        fake.connectFailure = null
+        controller.onForeground()
+        runCurrent()
+
+        assertEquals(2, fake.connectCalls)
+        assertTrue(controller.state.value.connection is ConnectionState.Connected)
+    }
+
+    @Test
+    fun `foreground does not revive a failure after the rider turns auto connect off`() = runTest {
+        devices.select(target)
+        devices.setAutoConnect(vin, true)
+        fake.connectFailure = BleException(BleFailure.GattError("connect", 133))
+        val (controller, _) = controller()
+        controller.onSession(vin)
+        runCurrent()
+        assertTrue(controller.state.value.connection is ConnectionState.Failed)
+
+        controller.setAutoConnect(false)
+        controller.onForeground()
+        runCurrent()
+
+        assertEquals(1, fake.connectCalls)
+        assertTrue(controller.state.value.connection is ConnectionState.Failed)
+    }
+
+    @Test
+    fun `turning mirroring back on retries a failed link`() = runTest {
+        devices.select(target)
+        fake.connectFailure = BleException(BleFailure.GattError("connect", 133))
+        val (controller, _) = controller()
+        controller.onSession(vin)
+        controller.connect()
+        runCurrent()
+        assertTrue(controller.state.value.connection is ConnectionState.Failed)
+        assertEquals(1, fake.connectCalls)
+
+        fake.connectFailure = null
+        controller.setMirroring(true)
+        runCurrent()
+
+        assertEquals(2, fake.connectCalls)
+        assertTrue(controller.state.value.connection is ConnectionState.Connected)
+    }
+
+    @Test
+    fun `disabling mirroring stops automatic reconnects`() = runTest {
+        devices.select(target)
+        val (controller, _) = controller()
+        controller.onSession(vin)
+        controller.setMirroring(true)
+        runCurrent()
+        assertEquals(1, fake.connectCalls)
+
+        controller.setMirroring(false)
+        runCurrent()
+        fake.latestSession.disconnect()
+        advanceTimeBy(1_001)
+        runCurrent()
+
+        assertEquals(1, fake.connectCalls)
+        assertTrue(controller.state.value.connection is ConnectionState.Failed)
+        assertFalse(controller.state.value.mirroringActive)
+    }
+
+    @Test
+    fun `a successful reconnect clears a previous mirroring error`() = runTest {
+        devices.select(target)
+        val (controller, _) = controller()
+        controller.onSession(vin)
+        controller.setMirroring(true)
+        runCurrent()
+        fake.latestSession.writeAction = {
+            throw BleException(BleFailure.GattError("writeCharacteristic", 133))
+        }
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals(BikeLinkController.MIRRORING_STOPPED_MESSAGE, controller.state.value.mirroringError)
+
+        fake.latestSession.writeAction = null
+        fake.latestSession.disconnect()
+        advanceTimeBy(1_001)
+        runCurrent()
+
+        assertTrue(controller.state.value.connection is ConnectionState.Connected)
+        assertTrue(controller.state.value.mirroringActive)
+        assertNull(controller.state.value.mirroringError)
+    }
+
+    @Test
     fun `ensure running adopts the armed vin after a process restart`() = runTest {
         devices.select(target)
         val preferences = InMemoryBikeLinkPreferences(

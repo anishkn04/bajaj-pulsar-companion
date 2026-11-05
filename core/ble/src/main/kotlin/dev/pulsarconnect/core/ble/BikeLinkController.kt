@@ -75,7 +75,7 @@ class BikeLinkController(
         if (previous == vin) {
             preferences.setArmedVin(vin)
             _state.update { it.copy(autoConnect = devices.autoConnect(vin)) }
-            ensureConnectedIfWanted()
+            ensureConnectedIfWanted(retryFailure = true)
             return
         }
         stopRuntime()
@@ -92,7 +92,7 @@ class BikeLinkController(
                 mirroringError = null,
             )
         }
-        ensureConnectedIfWanted()
+        ensureConnectedIfWanted(retryFailure = true)
     }
 
     /** Re-attaches to the armed VIN without a screen, e.g. after boot or a service restart. */
@@ -111,12 +111,12 @@ class BikeLinkController(
             }
         }
         reconcile()
-        ensureConnectedIfWanted()
+        ensureConnectedIfWanted(retryFailure = true)
     }
 
     fun onForeground() {
         suspended = false
-        ensureConnectedIfWanted()
+        ensureConnectedIfWanted(retryFailure = true)
     }
 
     /**
@@ -137,9 +137,11 @@ class BikeLinkController(
         preferences.setMirroring(enabled)
         if (!enabled) {
             stopRuntime()
+            connection.setAutoReconnect(_state.value.autoConnect)
             _state.update { it.copy(mirroringError = null) }
         } else {
-            ensureConnectedIfWanted()
+            connection.setAutoReconnect(true)
+            ensureConnectedIfWanted(retryFailure = true)
         }
     }
 
@@ -208,21 +210,21 @@ class BikeLinkController(
         )
     }
 
-    private fun ensureConnectedIfWanted() {
+    /** Connects only when the rider wants a link, optionally reviving a terminal failure. */
+    private fun ensureConnectedIfWanted(retryFailure: Boolean = false) {
         if (suspended) return
         val current = _state.value
         val target = current.selected ?: return
-        if (!current.settings.mirroring && !current.autoConnect) return
+        if (!preferences.settings.value.mirroring && !current.autoConnect) return
         when (connection.state.value) {
+            is ConnectionState.Failed -> if (retryFailure) connectTo(target)
             is ConnectionState.Connected,
             is ConnectionState.Connecting,
             is ConnectionState.Discovering,
             is ConnectionState.Reconnecting,
-            is ConnectionState.Failed,
             -> return
-            else -> Unit
+            else -> connectTo(target)
         }
-        connectTo(target)
     }
 
     private fun reconcile() {
@@ -232,7 +234,9 @@ class BikeLinkController(
         val canMirror = connected != null && settings.mirroring &&
             PhoneStatusProtocol.isSupportedBy(connected.services)
         if (canMirror) {
-            if (!sender.running) sender.start()
+            if (!sender.running && sender.start()) {
+                _state.update { it.copy(mirroringError = null) }
+            }
         } else {
             sender.stop()
         }
@@ -262,12 +266,18 @@ class BikeLinkController(
     }
 
     private fun onMirroringStopped(error: Throwable?) {
+        val connected = connection.state.value as? ConnectionState.Connected
+        val stoppedUnexpectedly = error == null &&
+            preferences.settings.value.mirroring &&
+            connected != null &&
+            PhoneStatusProtocol.isSupportedBy(connected.services)
         _state.update {
             it.copy(
                 mirroringActive = false,
                 mirroringError = when {
                     error != null -> MIRRORING_STOPPED_MESSAGE
-                    else -> it.mirroringError
+                    stoppedUnexpectedly -> MIRRORING_STOPPED_MESSAGE
+                    else -> null
                 },
             )
         }
