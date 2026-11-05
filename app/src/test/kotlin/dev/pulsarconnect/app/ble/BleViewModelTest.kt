@@ -298,6 +298,38 @@ class BleViewModelTest {
     }
 
     @Test
+    fun `permission result resumes a link that was waiting for access`() = runTest(dispatcher) {
+        devices.select(target)
+        devices.setAutoConnect(vin, true)
+        transport.missing = setOf(BlePermission.CONNECT)
+        val connection = BikeConnection(transport, backgroundScope, jitter = { it })
+        val controller = BikeLinkController(
+            devices = devices,
+            connection = connection,
+            preferences = InMemoryBikeLinkPreferences(
+                BikeLinkSettings(mirroring = false, keepInBackground = false, startOnBoot = false),
+            ),
+            statuses = flowOf(),
+            scope = backgroundScope,
+        )
+        val viewModel = viewModel(connection, controller)
+        viewModel.onSession(vin)
+        advanceUntilIdle()
+        runCurrent()
+        assertTrue(viewModel.state.value.connection is ConnectionState.MissingPermissions)
+
+        transport.missing = emptySet()
+        viewModel.onPermissionsChanged()
+        advanceUntilIdle()
+        runCurrent()
+
+        assertEquals(1, transport.connectCalls)
+        assertTrue(viewModel.state.value.connection is ConnectionState.Connected)
+        viewModel.onBackground()
+        viewModel.cancel()
+    }
+
+    @Test
     fun `signed out view model cannot start a scan`() = runTest(dispatcher) {
         val connection = BikeConnection(transport, backgroundScope)
         val controller = BikeLinkController(

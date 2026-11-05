@@ -113,14 +113,18 @@ class BleViewModel(
                 _state.update { it.copy(controlState = control) }
             }
         }
-        // Keep the runtime in sync with whether the controller is actively mirroring.
+        // Keep the foreground service alive whenever background mirroring is armed. This is
+        // intentionally based on the rider's intent, not on an active sender: the service must
+        // already be alive while the bike is reconnecting.
         scope.launch {
-            var mirroringWasActive = false
+            var serviceEnabled: Boolean? = null
             controller.state.collect { link ->
-                val active = link.settings.mirroring && link.mirroringActive
-                if (active != mirroringWasActive) {
-                    mirroringWasActive = active
-                    runtime.setEnabled(active)
+                val wanted = link.settings.runsInBackground &&
+                    link.settings.armedVin != null &&
+                    link.selected != null
+                if (wanted != serviceEnabled) {
+                    serviceEnabled = wanted
+                    runtime.setEnabled(wanted)
                 }
             }
         }
@@ -156,6 +160,12 @@ class BleViewModel(
                 adapterState = transport.adapterState.value,
             )
         }
+    }
+
+    /** Called after a permission dialog: refresh state and resume a link that was waiting. */
+    fun onPermissionsChanged() {
+        refreshPlatformState()
+        controller.onForeground()
     }
 
     fun scan() {

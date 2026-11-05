@@ -21,6 +21,8 @@ class BootReceiver : BroadcastReceiver() {
         val app = context.applicationContext as PulsarConnectApplication
         val settings = app.container.bikeLinkPreferences.settings.value
         if (!settings.resumesAfterBoot) return
+        val armedVin = settings.armedVin ?: return
+        if (app.container.bikeDevices.selected(armedVin) == null) return
 
         val start = Intent(context.applicationContext, BikeLinkService::class.java).apply {
             action = BikeLinkService.ACTION_START

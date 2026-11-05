@@ -109,7 +109,7 @@ class BleViewModelSettingsTest {
             viewModel.onSession(vin)
             runCurrent()
 
-            assertFalse(runtime.isEnabled)
+            assertTrue(runtime.isEnabled)
 
             viewModel.setKeepInBackground(false)
             runCurrent()
@@ -129,6 +129,44 @@ class BleViewModelSettingsTest {
         }
 
     @Test
+    fun `the service runs while background mirroring is armed before the link is active`() = runTest {
+        devices.select(target)
+        val preferences = InMemoryBikeLinkPreferences()
+        val runtime = RecordingRuntime()
+        val viewModel = viewModel(preferences, runtime)
+        viewModel.onSession(vin)
+        runCurrent()
+
+        assertTrue(runtime.isEnabled)
+        assertFalse(viewModel.state.value.phoneStatusSending)
+    }
+
+    @Test
+    fun `the service stays off when background mode is disabled`() = runTest {
+        devices.select(target)
+        val preferences = InMemoryBikeLinkPreferences(
+            BikeLinkSettings(mirroring = true, keepInBackground = false, startOnBoot = true),
+        )
+        val runtime = RecordingRuntime()
+        val viewModel = viewModel(preferences, runtime)
+        viewModel.onSession(vin)
+        runCurrent()
+
+        assertFalse(runtime.isEnabled)
+    }
+
+    @Test
+    fun `the service stays off until a bike is selected`() = runTest {
+        val preferences = InMemoryBikeLinkPreferences()
+        val runtime = RecordingRuntime()
+        val viewModel = viewModel(preferences, runtime)
+        viewModel.onSession(vin)
+        runCurrent()
+
+        assertFalse(runtime.isEnabled)
+    }
+
+    @Test
     fun `manual disconnect disarms mirroring and stops the service`() = runTest {
         devices.select(target)
         val preferences = InMemoryBikeLinkPreferences()
@@ -137,7 +175,7 @@ class BleViewModelSettingsTest {
         viewModel.onSession(vin)
         runCurrent()
 
-        assertFalse(runtime.isEnabled)
+        assertTrue(runtime.isEnabled)
 
         viewModel.disconnect()
         runCurrent()
@@ -186,9 +224,9 @@ class BleViewModelSettingsTest {
             private set
         val calls = mutableListOf<Boolean>()
 
-        override fun setEnabled(active: Boolean) {
-            isEnabled = active
-            calls += active
+        override fun setEnabled(enabled: Boolean) {
+            isEnabled = enabled
+            calls += enabled
         }
     }
 

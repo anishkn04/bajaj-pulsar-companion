@@ -11,15 +11,34 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.app.ServiceCompat
 import dev.pulsarconnect.app.MainActivity
 import dev.pulsarconnect.app.R
+import dev.pulsarconnect.core.ble.BikeDeviceStore
 import dev.pulsarconnect.core.ble.BikeLinkController
 import dev.pulsarconnect.core.ble.BikeLinkPreferences
+import dev.pulsarconnect.core.ble.BikeLinkSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
+
+/** The service only exists while the rider has an armed background link to a chosen bike. */
+internal fun shouldRunBikeLinkService(
+    settings: BikeLinkSettings,
+    hasSelectedBike: Boolean,
+): Boolean = settings.runsInBackground && settings.armedVin != null && hasSelectedBike
+
+/** Maps an incoming intent to the service's two lifecycle commands. */
+internal enum class BikeLinkServiceCommand { RESUME, STOP }
+
+internal fun bikeLinkServiceCommand(action: String?): BikeLinkServiceCommand = when (action) {
+    // A sticky restart arrives with a null intent and must resume foreground operation.
+    BikeLinkService.ACTION_STOP -> BikeLinkServiceCommand.STOP
+    else -> BikeLinkServiceCommand.RESUME
+}
 
 /**
  * Foreground service that keeps the bike link alive while mirroring is on.
@@ -45,9 +64,9 @@ class BikeLinkService : Service() {
 
     private lateinit var controller: BikeLinkController
     private lateinit var preferences: BikeLinkPreferences
+    private lateinit var bikeDevices: BikeDeviceStore
     private var attached = false
-
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var observerScope: CoroutineScope? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -55,25 +74,40 @@ class BikeLinkService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val action = intent?.action
-        when {
-            action == Companion.ACTION_START -> {
-                val app = applicationContext as dev.pulsarconnect.app.PulsarConnectApplication
-                controller = app.container.bikeLinkController
-                preferences = app.container.bikeLinkPreferences
-                attach()
-                // (Re)attach to the armed bike after boot or a process restart. The controller's
-                // existing connect-with-response logic handles the actual connection; this service
-                // only keeps the process alive while mirroring is on.
-                controller.ensureRunning()
-                startForeground(Companion.NOTIFICATION_ID, buildNotification())
-            }
-            action == Companion.ACTION_STOP -> {
-                stopForeground(true)
+        val app = applicationContext as dev.pulsarconnect.app.PulsarConnectApplication
+        controller = app.container.bikeLinkController
+        preferences = app.container.bikeLinkPreferences
+        bikeDevices = app.container.bikeDevices
+
+        when (bikeLinkServiceCommand(intent?.action)) {
+            BikeLinkServiceCommand.STOP -> {
+                // The notification action is a rider request to stop mirroring, not just to
+                // dismiss the notification. Runtime-driven stops use stopService() instead.
+                controller.setMirroring(false)
+                ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
                 detach()
                 stopSelf(startId)
+                return START_NOT_STICKY
             }
+            BikeLinkServiceCommand.RESUME -> Unit
         }
+
+        val settings = preferences.settings.value
+        if (!shouldRunBikeLinkService(settings, hasSelectedBike(settings))) {
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+            detach()
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
+
+        attach()
+        // Start foreground before touching the controller so a slow connect cannot trip the
+        // system's foreground-service timeout.
+        startForeground(Companion.NOTIFICATION_ID, buildNotification())
+        // (Re)attach to the armed bike after boot or a process restart. The controller's
+        // existing connect-with-response logic handles the actual connection; this service
+        // only keeps the process alive while mirroring is on.
+        controller.ensureRunning()
         return START_STICKY
     }
 
@@ -87,19 +121,25 @@ class BikeLinkService : Service() {
     private fun attach() {
         if (attached) return
         attached = true
-        // Mirroring may have been disabled while the process was dead; honour the persisted intent.
-        if (!preferences.settings.value.mirroring) {
-            stopSelf()
-            return
+        // Mirroring may have been disabled while the process was dead; honour the persisted
+        // intent and stop as soon as the rider disarms the background link.
+        observerScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate).also { scope ->
+            preferences.settings.onEach { settings ->
+                if (!shouldRunBikeLinkService(settings, hasSelectedBike(settings))) {
+                    ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                }
+            }.launchIn(scope)
         }
-        preferences.settings.onEach { settings ->
-            if (!settings.mirroring) stopSelf()
-        }.launchIn(scope)
     }
 
+    private fun hasSelectedBike(settings: BikeLinkSettings): Boolean =
+        settings.armedVin?.let { bikeDevices.selected(it) } != null
+
     private fun detach() {
-        if (!attached) return
         attached = false
+        observerScope?.cancel()
+        observerScope = null
     }
 
     private fun createNotificationChannel() {

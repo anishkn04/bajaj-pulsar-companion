@@ -11,6 +11,7 @@ import dev.pulsarconnect.app.ble.AndroidBleTransport
 import dev.pulsarconnect.app.ble.AndroidPhoneStatusSource
 import dev.pulsarconnect.app.ble.BikeLinkRuntime
 import dev.pulsarconnect.app.ble.BikeLinkService
+import dev.pulsarconnect.app.ble.shouldRunBikeLinkService
 import dev.pulsarconnect.app.ble.BleViewModel
 import dev.pulsarconnect.app.ble.PhoneStatusSource
 import dev.pulsarconnect.app.data.AndroidDatabase
@@ -83,11 +84,14 @@ class AppContainer(context: Context) {
     val bikeLinkRuntime: BikeLinkRuntime = object : BikeLinkRuntime {
         override fun setEnabled(enabled: Boolean) {
             val settings = bikeLinkPreferences.settings.value
-            // Only keep the foreground service running when mirroring is active, background mode
-            // is on, and a bike is armed. Otherwise the view model's own scope holds the link
+            // Only keep the foreground service running when mirroring is armed for background
+            // operation and a bike is armed. Otherwise the view model's own scope holds the link
             // while the app is in the foreground, and stopping the service avoids an unnecessary
             // persistent notification.
-            val shouldRun = enabled && settings.runsInBackground && settings.armedVin != null
+            val shouldRun = enabled && shouldRunBikeLinkService(
+                settings,
+                settings.armedVin?.let { bikeDevices.selected(it) } != null,
+            )
             val intent = Intent(context.applicationContext, BikeLinkService::class.java).apply {
                 action = if (shouldRun) BikeLinkService.ACTION_START else BikeLinkService.ACTION_STOP
             }
