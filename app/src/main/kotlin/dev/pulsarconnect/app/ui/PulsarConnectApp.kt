@@ -21,7 +21,11 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -32,9 +36,13 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.automirrored.outlined.List
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.Place
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
@@ -56,6 +64,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -157,6 +166,12 @@ private fun SignedInScreen(
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState, modifier = Modifier.imePadding()) },
+        bottomBar = {
+            FloatingBottomNavigationBar(
+                selectedDestination = navDestination,
+                onDestinationSelected = { navDestination = it },
+            )
+        },
     ) { innerPadding ->
         Box(
             modifier = Modifier
@@ -194,7 +209,7 @@ private fun SignedInScreen(
                     onAutoConnectChange = bleViewModel::setAutoConnect,
                     onClearSelection = bleViewModel::clearSelection,
                     onPhoneStatusChange = bleViewModel::setMirroring,
-                    onRefresh = bleViewModel::refreshPlatformState,
+                    onRefresh = bleViewModel::onPermissionsChanged,
                     onClearError = bleViewModel::clearError,
                     onBack = onBack,
                 )
@@ -233,11 +248,6 @@ private fun SignedInScreen(
                 )
             }
         }
-
-        FloatingBottomNavigationBar(
-            selectedDestination = navDestination,
-            onDestinationSelected = { navDestination = it },
-        )
     }
 }
 
@@ -249,43 +259,66 @@ private fun FloatingBottomNavigationBar(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(12.dp),
+            .padding(top = 0.dp),
+        shape = RoundedCornerShape(0.dp),
+        tonalElevation = 0.dp,
         color = MaterialTheme.colorScheme.surfaceContainer,
     ) {
-        NavigationBar(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 7.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            NavigationBarItem(
-                selected = selectedDestination == NavDestination.HOME,
-                onClick = { onDestinationSelected(NavDestination.HOME) },
-                icon = { },
-                label = { Text("Home") },
-            )
-            NavigationBarItem(
-                selected = selectedDestination == NavDestination.BIKE,
-                onClick = { onDestinationSelected(NavDestination.BIKE) },
-                icon = { },
-                label = { Text("Bike link") },
-            )
-            NavigationBarItem(
-                selected = selectedDestination == NavDestination.TRIPS,
-                onClick = { onDestinationSelected(NavDestination.TRIPS) },
-                icon = { },
-                label = { Text("Trips") },
-            )
-            NavigationBarItem(
-                selected = selectedDestination == NavDestination.REMINDERS,
-                onClick = { onDestinationSelected(NavDestination.REMINDERS) },
-                icon = { },
-                label = { Text("Reminders") },
-            )
-            NavigationBarItem(
-                selected = selectedDestination == NavDestination.SETTINGS,
-                onClick = { onDestinationSelected(NavDestination.SETTINGS) },
-                icon = { },
-                label = { Text("Settings") },
+            CompactNavigationItem(Icons.Outlined.Home, "Home", NavDestination.HOME, selectedDestination, onDestinationSelected)
+            CompactNavigationItem(Icons.Outlined.Place, "Bike link", NavDestination.BIKE, selectedDestination, onDestinationSelected)
+            CompactNavigationItem(Icons.AutoMirrored.Outlined.List, "Trips", NavDestination.TRIPS, selectedDestination, onDestinationSelected)
+            CompactNavigationItem(Icons.Outlined.Notifications, "Reminders", NavDestination.REMINDERS, selectedDestination, onDestinationSelected)
+            CompactNavigationItem(Icons.Outlined.Settings, "Settings", NavDestination.SETTINGS, selectedDestination, onDestinationSelected)
+        }
+    }
+}
+
+@Composable
+private fun CompactNavigationItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    destination: NavDestination,
+    selectedDestination: NavDestination,
+    onDestinationSelected: (NavDestination) -> Unit,
+) {
+    val selected = selectedDestination == destination
+    Column(
+        modifier = Modifier
+            .width(64.dp)
+            .clickable { onDestinationSelected(destination) },
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .height(32.dp)
+                .width(48.dp)
+                .background(
+                    if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                    RoundedCornerShape(16.dp),
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                modifier = Modifier.size(20.dp),
+                tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        Text(
+            label,
+            fontSize = 8.sp,
+            maxLines = 1,
+            color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -760,7 +793,12 @@ internal fun bleStatusValue(connection: ConnectionState): String = when (connect
 internal fun bleStatusDetail(state: BleUiState): String = when (val connection = state.connection) {
     is ConnectionState.Connected -> connection.services.size.let { count ->
         val target = connection.target.name ?: "Your bike"
-        val mirroring = if (state.phoneStatusEnabled) " Battery & signal mirroring is on." else ""
+        val mirroring = when {
+            state.phoneStatusError != null -> " Battery & signal mirroring is stopped."
+            state.phoneStatusSending -> " Battery & signal mirroring is active."
+            state.phoneStatusEnabled -> " Battery & signal mirroring is enabled but not sending."
+            else -> ""
+        }
         "$target · $count GATT service${if (count == 1) "" else "s"} discovered.$mirroring"
     }
     is ConnectionState.Failed -> connection.reason.toString()

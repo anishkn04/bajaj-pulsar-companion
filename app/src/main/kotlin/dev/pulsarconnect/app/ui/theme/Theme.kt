@@ -7,8 +7,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
 private val Ink = Color(0xFF0B0D10)
-private val Surface = Color(0xFF151A21)
-private val SurfaceVariant = Color(0xFF1E2630)
+private val Surface = Color(0xFF161D24)
+private val SurfaceVariant = Color(0xFF202A33)
 private val Electric = Color(0xFF4CC2FF)
 private val Amber = Color(0xFFFFB300)
 private val Mist = Color(0xFFE6EDF3)
@@ -25,6 +25,9 @@ private val PulsarColors = darkColorScheme(
     surface = Surface,
     onSurface = Mist,
     surfaceVariant = SurfaceVariant,
+    surfaceContainer = Color(0xFF161D24),
+    surfaceContainerLow = Color(0xFF12181E),
+    surfaceContainerHigh = Color(0xFF202A33),
     onSurfaceVariant = Muted,
     error = Danger,
     onError = Color(0xFF3A0000),

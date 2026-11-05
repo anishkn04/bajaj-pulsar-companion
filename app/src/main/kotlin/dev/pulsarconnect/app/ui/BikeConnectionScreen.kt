@@ -73,7 +73,6 @@ internal fun BikeConnectionScreen(
         val granted = grants.values.all { it }
         val action = pendingAction
         pendingAction = null
-        onRefresh()
         if (granted) {
             when (action) {
                 PendingBleAction.SCAN -> onScan()
@@ -81,6 +80,7 @@ internal fun BikeConnectionScreen(
                 null -> Unit
             }
         }
+        onRefresh()
     }
 
     var phonePermissionGranted by remember {
