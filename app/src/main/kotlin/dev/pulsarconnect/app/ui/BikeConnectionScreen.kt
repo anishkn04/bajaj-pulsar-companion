@@ -7,28 +7,39 @@ import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.TwoWheeler
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,16 +47,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import dev.pulsarconnect.app.ble.AndroidBlePermissions
 import dev.pulsarconnect.app.ble.BleUiState
 import dev.pulsarconnect.core.ble.AdapterState
-import dev.pulsarconnect.core.ble.BikeTarget
 import dev.pulsarconnect.core.ble.BleService
+import dev.pulsarconnect.core.ble.ClusterControlState
 import dev.pulsarconnect.core.ble.ConnectionState
 import dev.pulsarconnect.core.ble.ControlProtocol
-import dev.pulsarconnect.core.ble.ClusterControlState
 import dev.pulsarconnect.core.ble.DiscoveredDevice
 
 private enum class PendingBleAction { SCAN, CONNECT }
@@ -63,7 +72,6 @@ internal fun BikeConnectionScreen(
     onPhoneStatusChange: (Boolean) -> Unit,
     onRefresh: () -> Unit,
     onClearError: () -> Unit,
-    onBack: () -> Unit,
 ) {
     val context = LocalContext.current
     var pendingAction by remember { mutableStateOf<PendingBleAction?>(null) }
@@ -110,94 +118,120 @@ internal fun BikeConnectionScreen(
     }
 
     val connection = bleState.connection
+    val connecting = connection is ConnectionState.Connecting ||
+        connection is ConnectionState.Discovering ||
+        connection is ConnectionState.Reconnecting
+
     LazyColumn(
-        modifier = Modifier.fillMaxSize().safeDrawingPadding(),
-        contentPadding = PaddingValues(28.dp),
-        verticalArrangement = Arrangement.spacedBy(24.dp),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         item {
-            TextButton(onClick = onBack) { Text("Back to home") }
-            Text("Bike link", style = MaterialTheme.typography.headlineLarge)
-        }
-        item {
-            Text(
-                "Connect to your bike over Bluetooth. This build discovers and shows raw GATT " +
-                    "services only; cluster values are not decoded until the protocol is captured.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            ScreenHeader(
+                title = "Bike link",
+                subtitle = "Manage the Bluetooth link, battery/signal mirroring and connection diagnostics.",
             )
         }
 
+        bleState.error?.let { error ->
+            item {
+                AlertCard(
+                    title = "Bike link error",
+                    message = error,
+                    dismissLabel = "Dismiss",
+                    onDismiss = onClearError,
+                )
+            }
+        }
+
         item {
-            Card(
-                Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        if (connection is ConnectionState.Connecting ||
-                            connection is ConnectionState.Discovering ||
-                            connection is ConnectionState.Reconnecting
-                        ) {
-                            CircularProgressIndicator(Modifier.padding(2.dp), strokeWidth = 2.dp)
-                        }
-                        Column {
-                            Text(
-                                bleStatusValue(connection),
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                            Text(
-                                bleStatusDetail(bleState),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-
-                    if (bleState.adapterState == AdapterState.OFF) {
-                        Text("Bluetooth is turned off.", color = MaterialTheme.colorScheme.error)
-                        Button(onClick = {
-                            runCatching { context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }
-                        }) { Text("Open Bluetooth settings") }
-                    }
-
-                    if (bleState.missingPermissions.isNotEmpty()) {
-                        Text(
-                            "Nearby-device access is required to scan and connect.",
-                            color = MaterialTheme.colorScheme.error,
+            PulsarCard {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (connecting) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.primary,
                         )
-                        Button(onClick = { request(PendingBleAction.SCAN) }) {
-                            Text("Grant Bluetooth access")
-                        }
                     }
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            bleStatusValue(connection),
+                            style = MaterialTheme.typography.titleLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            bleStatusDetail(bleState),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    StatusPill(
+                        text = if (connection is ConnectionState.Connected) "Online" else "Offline",
+                        tone = connectionTone(connection),
+                    )
+                }
 
-                    when (connection) {
-                        is ConnectionState.Connected -> {
-                            Button(onClick = onDisconnect) { Text("Disconnect") }
-                        }
-                        is ConnectionState.Failed -> {
-                            Button(onClick = onRetry) { Text("Retry") }
-                        }
-                        is ConnectionState.MissingPermissions -> {
-                            Button(onClick = { request(PendingBleAction.CONNECT) }) {
-                                Text("Grant access and connect")
+                if (bleState.adapterState == AdapterState.OFF) {
+                    Text(
+                        "Bluetooth is turned off.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    PillButton(
+                        label = "Open Bluetooth settings",
+                        onClick = {
+                            runCatching {
+                                context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
                             }
-                        }
-                        is ConnectionState.BluetoothUnavailable -> {
-                            Button(onClick = onRetry) { Text("Retry") }
-                        }
-                        else -> {
-                            val selected = bleState.selected
-                            if (selected != null) {
-                                Button(
-                                    onClick = ::connectOrRequest,
-                                    enabled = !bleState.scanning,
-                                ) { Text("Connect") }
-                            }
+                        },
+                        style = PillStyle.Tonal,
+                    )
+                }
+
+                if (bleState.missingPermissions.isNotEmpty()) {
+                    Text(
+                        "Nearby-device access is required to scan and connect.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    PillButton(
+                        label = "Grant Bluetooth access",
+                        onClick = { request(PendingBleAction.SCAN) },
+                    )
+                }
+
+                when (connection) {
+                    is ConnectionState.Connected -> PillButton(
+                        label = "Disconnect",
+                        onClick = onDisconnect,
+                        style = PillStyle.Outlined,
+                    )
+                    is ConnectionState.Failed -> PillButton(
+                        label = "Retry",
+                        onClick = onRetry,
+                        icon = Icons.Outlined.Refresh,
+                    )
+                    is ConnectionState.MissingPermissions -> PillButton(
+                        label = "Grant access and connect",
+                        onClick = { request(PendingBleAction.CONNECT) },
+                    )
+                    is ConnectionState.BluetoothUnavailable -> PillButton(
+                        label = "Retry",
+                        onClick = onRetry,
+                        icon = Icons.Outlined.Refresh,
+                    )
+                    else -> {
+                        if (bleState.selected != null) {
+                            PillButton(
+                                label = "Connect",
+                                onClick = ::connectOrRequest,
+                                enabled = !bleState.scanning,
+                            )
                         }
                     }
                 }
@@ -206,31 +240,34 @@ internal fun BikeConnectionScreen(
 
         if (connection is ConnectionState.Connected) {
             item {
-                Card(
-                    Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                ) {
-                    SwitchRow(
+                PulsarCard {
+                    PulsarSwitchRow(
                         title = "Battery & signal",
                         description = "Sends only the verified idle battery/signal frame. It never sends calls, contacts or messages.",
                         checked = bleState.phoneStatusEnabled,
                         onCheckedChange = onPhoneStatusChange,
                         enabled = bleState.phoneStatusAvailable,
                     )
-                    if (!bleState.phoneStatusAvailable) {
-                        Text(
+                    when {
+                        !bleState.phoneStatusAvailable -> Text(
                             "This bike did not expose the writable phone-status endpoint, so nothing will be sent.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                    } else {
-                        if (bleState.phoneStatusSending) {
-                            Text(
-                                "Sending battery and signal every second.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary,
-                            )
-                        }
+                        bleState.phoneStatusSending -> StatusPill(
+                            text = "Sending battery and signal",
+                            tone = StatusTone.Active,
+                        )
+                        bleState.phoneStatusError != null -> StatusPill(
+                            text = "Mirroring stopped",
+                            tone = StatusTone.Error,
+                        )
+                        bleState.phoneStatusEnabled -> StatusPill(
+                            text = "Enabled · waiting for the bike",
+                            tone = StatusTone.Warning,
+                        )
+                    }
+                    if (bleState.phoneStatusAvailable) {
                         if (phonePermissionGranted) {
                             Text(
                                 "Phone-state permission is granted; signal appears when the network reports it.",
@@ -243,31 +280,20 @@ internal fun BikeConnectionScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                            TextButton(
+                            CardLink(
+                                label = "Allow signal",
                                 onClick = {
                                     phonePermissionLauncher.launch(Manifest.permission.READ_PHONE_STATE)
                                 },
-                            ) { Text("Allow signal") }
+                            )
                         }
                     }
                     bleState.phoneStatusError?.let { message ->
-                        Text(message, color = MaterialTheme.colorScheme.error)
-                    }
-                }
-            }
-        }
-
-        bleState.error?.let { error ->
-            item {
-                Card(
-                    Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer,
-                    ),
-                ) {
-                    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(error, color = MaterialTheme.colorScheme.onErrorContainer)
-                        TextButton(onClick = onClearError) { Text("Dismiss") }
+                        Text(
+                            message,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
                     }
                 }
             }
@@ -275,60 +301,124 @@ internal fun BikeConnectionScreen(
 
         bleState.selected?.let { selected ->
             item {
-                Card(
-                    Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                PulsarCard {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Surface(
+                            modifier = Modifier.size(48.dp),
+                            shape = MaterialTheme.shapes.medium,
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center,
+                                modifier = Modifier.fillMaxSize(),
+                            ) {
+                                Icon(
+                                    Icons.Outlined.TwoWheeler,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(26.dp),
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                selected.name ?: "Unnamed Bluetooth device",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                selected.id,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        StatusPill(
+                            text = bleStatusValue(connection),
+                            tone = connectionTone(connection),
+                        )
+                    }
+                    PulsarDivider()
+                    PulsarSwitchRow(
+                        title = "Auto-connect",
+                        description = "Reconnects while the app or background service is running.",
+                        checked = bleState.autoConnect,
+                        onCheckedChange = onAutoConnectChange,
+                    )
+                    PulsarDivider()
+                    TextButton(onClick = onClearSelection) {
+                        Icon(
+                            Icons.Outlined.DeleteOutline,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.error,
+                        )
+                        Spacer(Modifier.width(6.dp))
                         Text(
-                            selected.name ?: "Unnamed Bluetooth device",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
+                            "Forget this bike",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.error,
                         )
-                        Text(
-                            selected.id,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        SwitchRow(
-                            title = "Auto-connect",
-                            description = "Only while this screen is in the foreground.",
-                            checked = bleState.autoConnect,
-                            onCheckedChange = onAutoConnectChange,
-                        )
-                        TextButton(onClick = onClearSelection) { Text("Forget this bike") }
                     }
                 }
             }
         }
 
+        item { SectionHeader("Available nearby") }
         item {
-            Card(
-                Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(
-                        "Turn the bike ignition and kill switch on, then scan. " +
-                            "Bluetooth addresses stay on this phone and are never exported.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Button(
-                        onClick = ::scanOrRequest,
-                        enabled = !bleState.scanning && bleState.missingPermissions.isEmpty(),
+            PulsarCard {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Surface(
+                        modifier = Modifier.size(42.dp),
+                        shape = MaterialTheme.shapes.medium,
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     ) {
-                        Text(if (bleState.scanning) "Scanning…" else "Scan for bikes")
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier.fillMaxSize(),
+                        ) {
+                            Icon(
+                                Icons.Outlined.Search,
+                                contentDescription = null,
+                                modifier = Modifier.size(22.dp),
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        }
                     }
-                    if (bleState.devices.isEmpty()) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(
-                            if (bleState.scanning) "Listening for nearby Bluetooth devices…"
-                            else "No devices found yet.",
-                            style = MaterialTheme.typography.bodyMedium,
+                            "Pair another motorcycle",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            "Turn the bike ignition and kill switch on, then scan.",
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+                }
+                PillButton(
+                    label = if (bleState.scanning) "Scanning…" else "Scan for bikes",
+                    onClick = ::scanOrRequest,
+                    enabled = !bleState.scanning && bleState.missingPermissions.isEmpty(),
+                    icon = Icons.Outlined.Search,
+                )
+                if (bleState.devices.isEmpty()) {
+                    Text(
+                        if (bleState.scanning) "Listening for nearby Bluetooth devices…"
+                        else "No devices found yet.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }
@@ -343,81 +433,7 @@ internal fun BikeConnectionScreen(
 
         if (connection is ConnectionState.Connected) {
             item {
-                Text(
-                    "GATT inspector",
-                    style = MaterialTheme.typography.labelLarge.copy(letterSpacing = 1.5.sp),
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-            if (connection.services.isEmpty()) {
-                item {
-                    Text(
-                        "The bike did not expose any GATT services.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            items(connection.services, key = { it.uuid.toString() }) { service ->
-                ServiceCard(service)
-            }
-            bleState.controlState.frame?.let { frame ->
-                item {
-                    Card(
-                        Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                    ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Text(
-                                "The cluster's CONTROL characteristic is polled every 700 ms. Values are counters only; this app performs no actions.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                Column(Modifier.weight(1f)) {
-                                    Text("Volume", style = MaterialTheme.typography.bodySmall)
-                                    Text("${frame.volume}", style = MaterialTheme.typography.bodyMedium)
-                                }
-                                Column(Modifier.weight(1f)) {
-                                    Text("Call accept", style = MaterialTheme.typography.bodySmall)
-                                    Text("${frame.callAccept}", style = MaterialTheme.typography.bodyMedium)
-                                }
-                                Column(Modifier.weight(1f)) {
-                                    Text("Call reject", style = MaterialTheme.typography.bodySmall)
-                                    Text("${frame.callReject}", style = MaterialTheme.typography.bodyMedium)
-                                }
-                                Column(Modifier.weight(1f)) {
-                                    Text("Next track", style = MaterialTheme.typography.bodySmall)
-                                    Text("${frame.next}", style = MaterialTheme.typography.bodyMedium)
-                                }
-                            }
-                            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                Column(Modifier.weight(1f)) {
-                                    Text("Previous track", style = MaterialTheme.typography.bodySmall)
-                                    Text("${frame.previous}", style = MaterialTheme.typography.bodyMedium)
-                                }
-                                Column(Modifier.weight(1f)) {
-                                    Text("Play/pause", style = MaterialTheme.typography.bodySmall)
-                                    Text("${if (frame.resume > 0) 1 else 0} / ${if (frame.pause > 0) 1 else 0}", style = MaterialTheme.typography.bodyMedium)
-                                }
-                                Column(Modifier.weight(1f)) {
-                                    Text("Missed-call read", style = MaterialTheme.typography.bodySmall)
-                                    Text("${frame.missedCallRead}", style = MaterialTheme.typography.bodyMedium)
-                                }
-                                Column(Modifier.weight(1f)) {
-                                    Text("Alert read", style = MaterialTheme.typography.bodySmall)
-                                    Text("${frame.alertRead}", style = MaterialTheme.typography.bodyMedium)
-                                }
-                            }
-                            Text(
-                                "Polling: ${if (bleState.controlState.polling) "on" else "off"} · " +
-                                    "Response size: ${ControlProtocol.RESPONSE_SIZE} bytes",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
+                DiagnosticsCard(connection, bleState.controlState)
             }
         }
     }
@@ -429,19 +445,15 @@ private fun DeviceRow(
     selected: Boolean,
     onSelect: () -> Unit,
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-    ) {
+    PulsarCard(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp)) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                     device.name ?: "Unnamed Bluetooth device",
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
@@ -450,35 +462,115 @@ private fun DeviceRow(
                     fontFamily = FontFamily.Monospace,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    StatusPill(text = "${device.rssi} dBm", tone = StatusTone.Neutral)
+                    if (device.bonded) StatusPill(text = "Paired", tone = StatusTone.Complete)
+                }
+            }
+            PillButton(
+                label = if (selected) "Selected" else "Use",
+                onClick = onSelect,
+                style = if (selected) PillStyle.Tonal else PillStyle.Outlined,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DiagnosticsCard(
+    connection: ConnectionState.Connected,
+    controlState: ClusterControlState,
+) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    PulsarCard {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
-                    "${device.rssi} dBm${if (device.bonded) " · paired" else ""}",
+                    "Advanced diagnostics",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    "${connection.services.size} GATT service${if (connection.services.size == 1) "" else "s"} · " +
+                        "CONTROL polling ${if (controlState.polling) "on" else "off"}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            TextButton(onClick = onSelect) {
-                Text(if (selected) "Selected" else "Use")
+            Icon(
+                if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                contentDescription = if (expanded) "Hide diagnostics" else "Show diagnostics",
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
+        AnimatedVisibility(visible = expanded) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                PulsarDivider()
+                if (connection.services.isEmpty()) {
+                    Text(
+                        "The bike did not expose any GATT services.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                connection.services.forEach { service -> DiagnosticsServiceCard(service) }
+                controlState.frame?.let { frame ->
+                    PulsarDivider()
+                    Text(
+                        "CONTROL counters",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        MetricBlock("Volume", "${frame.volume}", Modifier.weight(1f))
+                        MetricBlock("Accept", "${frame.callAccept}", Modifier.weight(1f))
+                        MetricBlock("Reject", "${frame.callReject}", Modifier.weight(1f))
+                        MetricBlock("Next", "${frame.next}", Modifier.weight(1f))
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        MetricBlock("Previous", "${frame.previous}", Modifier.weight(1f))
+                        MetricBlock(
+                            "Play / pause",
+                            "${if (frame.resume > 0) 1 else 0} / ${if (frame.pause > 0) 1 else 0}",
+                            Modifier.weight(1f),
+                        )
+                        MetricBlock("Missed calls", "${frame.missedCallRead}", Modifier.weight(1f))
+                        MetricBlock("Alerts", "${frame.alertRead}", Modifier.weight(1f))
+                    }
+                    Text(
+                        "Read-only counters. This app performs no cluster actions. " +
+                            "Response size: ${ControlProtocol.RESPONSE_SIZE} bytes.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun ServiceCard(service: BleService) {
-    Card(
+private fun DiagnosticsServiceCard(service: BleService) {
+    Surface(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(
-                "Service",
-                style = MaterialTheme.typography.labelLarge.copy(letterSpacing = 1.5.sp),
-                color = MaterialTheme.colorScheme.primary,
-            )
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
             Text(
                 service.uuid.toString(),
                 style = MaterialTheme.typography.bodySmall,
                 fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.primary,
             )
             if (service.characteristics.isEmpty()) {
                 Text(
@@ -494,7 +586,7 @@ private fun ServiceCard(service: BleService) {
                     if (characteristic.canNotify) add("notify")
                     if (characteristic.canIndicate) add("indicate")
                 }.joinToString(", ").ifEmpty { "no access" }
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
                     Text(
                         characteristic.uuid.toString(),
                         style = MaterialTheme.typography.bodySmall,
@@ -509,4 +601,17 @@ private fun ServiceCard(service: BleService) {
             }
         }
     }
+}
+
+private fun connectionTone(connection: ConnectionState): StatusTone = when (connection) {
+    is ConnectionState.Connected -> StatusTone.Active
+    is ConnectionState.Failed -> StatusTone.Error
+    is ConnectionState.Connecting,
+    is ConnectionState.Discovering,
+    is ConnectionState.Reconnecting,
+    -> StatusTone.Warning
+    is ConnectionState.MissingPermissions,
+    ConnectionState.BluetoothUnavailable,
+    -> StatusTone.Warning
+    ConnectionState.Idle -> StatusTone.Neutral
 }
