@@ -47,6 +47,7 @@ internal fun TripHistoryScreen(
         mutableStateOf("")
     }
     val enabled = !state.busy && !state.localLoading && !state.localLoadFailed
+    val completedTrips = state.trips.filter { it.endTime != null }
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -105,11 +106,11 @@ internal fun TripHistoryScreen(
             }
         }
 
-        item { SectionHeader("Saved trips (${state.trips.size}${if (state.hasMoreTrips) "+" else ""})") }
-        if (state.trips.isEmpty() && !state.localLoading && !state.localLoadFailed) {
+        item { SectionHeader("Saved trips (${completedTrips.size}${if (state.hasMoreTrips) "+" else ""})") }
+        if (completedTrips.isEmpty() && !state.localLoading && !state.localLoadFailed) {
             item { EmptyState("No trips yet. Start a manual trip above to create your first record.") }
         }
-        items(state.trips.filter { it.endTime != null }) { trip -> TripRecordCard(trip) }
+        items(completedTrips) { trip -> TripRecordCard(trip) }
         if (state.hasMoreTrips) {
             item {
                 PillButton(

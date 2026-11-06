@@ -61,7 +61,7 @@ internal fun HomeScreen(
         )
         HomeFeatureCard(
             title = "Trips",
-            value = "${state.trips.size}${if (state.hasMoreTrips) "+" else ""} saved trips",
+            value = "${state.trips.count { it.endTime != null }}${if (state.hasMoreTrips) "+" else ""} saved trips",
             detail = if (state.activeTrip != null) {
                 "A manual trip is in progress."
             } else {
