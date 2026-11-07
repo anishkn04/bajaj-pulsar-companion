@@ -50,6 +50,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.pulsarconnect.app.ble.BleUiState
 import dev.pulsarconnect.app.ble.BleViewModel
+import dev.pulsarconnect.core.ble.BleFailure
 import dev.pulsarconnect.core.ble.ConnectionState
 import dev.pulsarconnect.core.data.isDue
 
@@ -283,7 +284,35 @@ internal fun bleStatusValue(connection: ConnectionState): String = when (connect
     is ConnectionState.Connecting, is ConnectionState.Discovering -> "Connecting…"
     is ConnectionState.Connected -> "Connected"
     is ConnectionState.Reconnecting -> "Reconnecting…"
-    is ConnectionState.Failed -> "Connection failed"
+    is ConnectionState.Failed -> when (connection.reason) {
+        BleFailure.NotResponding, is BleFailure.TooManyAttempts -> "Bike not responding"
+        else -> "Connection failed"
+    }
+}
+
+internal fun bleFailureText(failure: BleFailure): String = when (failure) {
+    BleFailure.NotResponding,
+    is BleFailure.TooManyAttempts ->
+        "The bike did not answer. Turn it on and make sure the cluster is awake, then retry."
+
+    is BleFailure.ConnectTimeout ->
+        "The bike did not connect in time. Make sure it is on and nearby, then retry."
+    is BleFailure.DiscoveryTimeout ->
+        "The bike did not finish sharing its services. Move closer and retry."
+    is BleFailure.DiscoveryFailed ->
+        "The bike's Bluetooth services could not be read. Retry."
+    is BleFailure.MtuTooSmall ->
+        "This bike's Bluetooth link is too small for battery and signal mirroring."
+    is BleFailure.Disconnected ->
+        "The bike link ended. Make sure the bike is on, then retry."
+    is BleFailure.GattError ->
+        "Bluetooth reported an error while talking to the bike. Retry."
+    BleFailure.AdapterOff ->
+        "Turn on Bluetooth, then retry."
+    is BleFailure.PermissionDenied ->
+        "Nearby-device permission is needed to reach the bike."
+    is BleFailure.Unexpected ->
+        "The bike link failed unexpectedly. Retry."
 }
 
 internal fun bleStatusDetail(state: BleUiState): String = when (val connection = state.connection) {
@@ -297,7 +326,7 @@ internal fun bleStatusDetail(state: BleUiState): String = when (val connection =
         }
         "$target · $count GATT service${if (count == 1) "" else "s"} discovered.$mirroring"
     }
-    is ConnectionState.Failed -> connection.reason.toString()
+    is ConnectionState.Failed -> bleFailureText(connection.reason)
     ConnectionState.BluetoothUnavailable -> "Turn on Bluetooth, then open the bike link."
     is ConnectionState.MissingPermissions -> "Grant nearby-device access to scan for your bike."
     else -> if (state.selected != null) {
