@@ -25,6 +25,7 @@ class PhoneStatusSender(
     private val intervalMillis: Long = DEFAULT_INTERVAL_MILLIS,
     private val initialHeartbeat: Int = 1,
     private val onStopped: (Throwable?) -> Unit = {},
+    private val onSent: () -> Unit = {},
 ) {
     init {
         require(intervalMillis > 0) { "Send interval must be positive" }
@@ -34,17 +35,30 @@ class PhoneStatusSender(
     private val statuses: Flow<PhoneStatus> = statuses
     private var job: Job? = null
 
+    @Volatile
+    private var sentThisRun: Boolean = false
+
     val running: Boolean
         get() = job?.isActive == true
+
+    /**
+     * True only while this run is alive and has completed at least one write. Callers must gate
+     * "mirroring active" on this rather than on [running], which becomes true before the first
+     * GATT write has been acknowledged.
+     */
+    val hasSent: Boolean
+        get() = sentThisRun && running
 
     /** Returns false when a sender loop is already running. */
     fun start(): Boolean {
         if (running) return false
+        sentThisRun = false
         job = scope.launch { sendLoop() }
         return true
     }
 
     fun stop() {
+        sentThisRun = false
         job?.cancel()
         job = null
     }
@@ -69,6 +83,10 @@ class PhoneStatusSender(
                         }
                         if (!connection.sendPhoneStatus(current, heartbeat)) break
                         heartbeat = nextHeartbeat(heartbeat)
+                        if (!sentThisRun) {
+                            sentThisRun = true
+                            onSent()
+                        }
                         delay(intervalMillis)
                         status = latest.value ?: current
                     }

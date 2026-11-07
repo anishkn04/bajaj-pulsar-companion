@@ -1,5 +1,6 @@
 package dev.pulsarconnect.core.ble
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.TestScope
@@ -246,6 +247,101 @@ class PhoneStatusSenderTest {
                 PhoneStatusProtocol.encodeIdle(PhoneStatus(23, 1), 2),
                 fake.latestSession.writes[1].bytes,
             )
+        } finally {
+            sender.stop()
+            connection.stop()
+        }
+    }
+
+    @Test
+    fun `has sent stays false until the first write completes`() = runTest {
+        val connection = connectSupported()
+        val gate = CompletableDeferred<Unit>()
+        fake.latestSession.writeAction = { gate.await() }
+        var sent = 0
+        val sender = PhoneStatusSender(
+            connection,
+            MutableStateFlow(status),
+            backgroundScope,
+            intervalMillis = 1_000,
+            onSent = { sent++ },
+        )
+        try {
+            sender.start()
+            runCurrent()
+
+            assertTrue(sender.running)
+            assertFalse(sender.hasSent)
+            assertEquals(0, sent)
+            assertEquals(1, fake.latestSession.writes.size)
+
+            gate.complete(Unit)
+            runCurrent()
+
+            assertTrue(sender.hasSent)
+            assertEquals(1, sent)
+        } finally {
+            sender.stop()
+            connection.stop()
+        }
+    }
+
+    @Test
+    fun `has sent and on sent reset for a new run`() = runTest {
+        val connection = connectSupported()
+        var sent = 0
+        val sender = PhoneStatusSender(
+            connection,
+            MutableStateFlow(status),
+            backgroundScope,
+            intervalMillis = 1_000,
+            onSent = { sent++ },
+        )
+        try {
+            sender.start()
+            runCurrent()
+            assertTrue(sender.hasSent)
+            assertEquals(1, sent)
+
+            sender.stop()
+            assertFalse(sender.hasSent)
+            assertEquals(1, sent)
+
+            sender.start()
+            runCurrent()
+            assertTrue(sender.hasSent)
+            assertEquals(2, sent)
+            assertEquals(2, fake.latestSession.writes.size)
+        } finally {
+            sender.stop()
+            connection.stop()
+        }
+    }
+
+    @Test
+    fun `a disconnect clears has sent without another callback`() = runTest {
+        val connection = connectSupported()
+        var sent = 0
+        val sender = PhoneStatusSender(
+            connection,
+            MutableStateFlow(status),
+            backgroundScope,
+            intervalMillis = 1_000,
+            onSent = { sent++ },
+        )
+        try {
+            sender.start()
+            runCurrent()
+            assertTrue(sender.hasSent)
+
+            fake.latestSession.disconnect()
+            runCurrent()
+            advanceTimeBy(1_000)
+            runCurrent()
+
+            assertFalse(sender.running)
+            assertFalse(sender.hasSent)
+            assertEquals(1, sent)
         } finally {
             sender.stop()
             connection.stop()

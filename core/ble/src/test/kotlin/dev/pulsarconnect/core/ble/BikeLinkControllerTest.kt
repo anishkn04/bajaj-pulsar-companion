@@ -1,5 +1,6 @@
 package dev.pulsarconnect.core.ble
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.TestScope
@@ -332,6 +333,65 @@ class BikeLinkControllerTest {
         assertTrue(controller.state.value.connection is ConnectionState.Connected)
         assertTrue(controller.state.value.mirroringActive)
         assertNull(controller.state.value.mirroringError)
+    }
+
+    @Test
+    fun `mirroring and polling wait for the first confirmed status write`() = runTest {
+        devices.select(target)
+        val gate = CompletableDeferred<Unit>()
+        fake.writeAction = { gate.await() }
+        val (controller, _) = controller()
+        controller.onSession(vin)
+        controller.setMirroring(true)
+        runCurrent()
+
+        assertTrue(controller.state.value.connection is ConnectionState.Connected)
+        assertFalse(controller.state.value.mirroringActive)
+        assertEquals(1, writes())
+        assertTrue(fake.latestSession.reads.isEmpty())
+        assertFalse(controller.controlState.value.polling)
+
+        gate.complete(Unit)
+        runCurrent()
+
+        assertTrue(controller.state.value.mirroringActive)
+        assertNull(controller.state.value.mirroringError)
+        assertTrue(fake.latestSession.reads.isNotEmpty())
+        assertTrue(controller.controlState.value.polling)
+    }
+
+    @Test
+    fun `a previous mirroring error survives reconnect until the next write succeeds`() = runTest {
+        devices.select(target)
+        val (controller, _) = controller()
+        controller.onSession(vin)
+        controller.setMirroring(true)
+        runCurrent()
+        fake.latestSession.writeAction = {
+            throw BleException(BleFailure.GattError("writeCharacteristic", 133))
+        }
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals(BikeLinkController.MIRRORING_STOPPED_MESSAGE, controller.state.value.mirroringError)
+
+        val gate = CompletableDeferred<Unit>()
+        fake.writeAction = { gate.await() }
+        fake.latestSession.writeAction = null
+        fake.latestSession.disconnect()
+        advanceTimeBy(1_001)
+        runCurrent()
+
+        assertTrue(controller.state.value.connection is ConnectionState.Connected)
+        assertEquals(BikeLinkController.MIRRORING_STOPPED_MESSAGE, controller.state.value.mirroringError)
+        assertFalse(controller.state.value.mirroringActive)
+        assertFalse(controller.controlState.value.polling)
+
+        gate.complete(Unit)
+        runCurrent()
+
+        assertTrue(controller.state.value.mirroringActive)
+        assertNull(controller.state.value.mirroringError)
+        assertTrue(controller.controlState.value.polling)
     }
 
     @Test

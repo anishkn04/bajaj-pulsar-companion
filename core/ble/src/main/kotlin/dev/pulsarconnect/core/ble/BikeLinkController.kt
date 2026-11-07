@@ -38,6 +38,7 @@ class BikeLinkController(
         statuses = statuses,
         scope = scope,
         onStopped = ::onMirroringStopped,
+        onSent = ::onMirroringSent,
     )
     private val controls = ControlPoller(connection, scope)
 
@@ -234,14 +235,17 @@ class BikeLinkController(
         val canMirror = connected != null && settings.mirroring &&
             PhoneStatusProtocol.isSupportedBy(connected.services)
         if (canMirror) {
-            if (!sender.running && sender.start()) {
-                _state.update { it.copy(mirroringError = null) }
-            }
+            // Starting the sender only means it may try; mirroring is not reported as active
+            // until the sender confirms a real GATT write.
+            sender.start()
         } else {
             sender.stop()
         }
 
-        val canPoll = connected != null && settings.mirroring &&
+        // CONTROL reads share the transport with the status writes. Polling before the first
+        // confirmed write delays the readiness probe/MTU exchange and can make the cluster
+        // ignore the first ATT operation, so wait for a successful status write.
+        val canPoll = connected != null && canMirror && sender.hasSent &&
             ControlProtocol.isSupportedBy(connected.services)
         if (canPoll) {
             controls.start()
@@ -251,12 +255,18 @@ class BikeLinkController(
 
         _state.update {
             it.copy(
-                mirroringActive = sender.running,
+                mirroringActive = sender.running && sender.hasSent && it.mirroringError == null,
                 mirroringError = if (settings.mirroring) it.mirroringError else null,
             )
         }
 
         if (settings.mirroring) ensureConnectedIfWanted()
+    }
+
+    /** A confirmed first status write: mirroring is finally real and diagnostics may poll. */
+    private fun onMirroringSent() {
+        _state.update { it.copy(mirroringError = null) }
+        reconcile()
     }
 
     private fun stopRuntime() {
@@ -266,6 +276,7 @@ class BikeLinkController(
     }
 
     private fun onMirroringStopped(error: Throwable?) {
+        controls.stop()
         val connected = connection.state.value as? ConnectionState.Connected
         val stoppedUnexpectedly = error == null &&
             preferences.settings.value.mirroring &&
