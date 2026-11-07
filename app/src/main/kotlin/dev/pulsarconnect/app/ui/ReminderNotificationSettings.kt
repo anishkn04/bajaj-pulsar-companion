@@ -154,13 +154,7 @@ internal fun ReminderNotificationSettings(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Text(
-            "Optional local-only alerts use saved reminders, dates and your latest saved odometer, " +
-                "not live bike data. Checks run roughly every 12 hours; battery restrictions and Android " +
-                "may delay them. This is not an exact alarm. Each reminder alerts only once.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+
         Text(
             "Signing out stops alerts, but keeps your opt-in preference on this phone.",
             style = MaterialTheme.typography.bodySmall,

@@ -427,11 +427,6 @@ internal fun LocalDataStatus(
     onRetry: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            "Saved on this phone for this VIN. Available offline; no cloud sync.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
         if (state.localLoading || state.busy) {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),

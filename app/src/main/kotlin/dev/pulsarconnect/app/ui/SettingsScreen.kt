@@ -49,21 +49,21 @@ internal fun SettingsScreen(
         SectionCard(title = "Bike link mirroring") {
             PulsarSwitchRow(
                 title = "Mirror phone status to cluster",
-                description = "Sends only the verified idle battery/signal frame. Never calls, contacts or messages.",
+                description = null,
                 checked = bleState.settings.mirroring,
                 onCheckedChange = onMirroringChange,
             )
             PulsarDivider()
             PulsarSwitchRow(
                 title = "Keep mirroring in background",
-                description = "Uses a foreground service so mirroring survives leaving the app.",
+                description = null,
                 checked = bleState.settings.keepInBackground,
                 onCheckedChange = onBackgroundChange,
             )
             PulsarDivider()
             PulsarSwitchRow(
                 title = "Resume mirroring after reboot",
-                description = "Only active when mirroring and background mode are both on and a bike is selected.",
+                description = null,
                 checked = bleState.settings.startOnBoot,
                 onCheckedChange = onBootChange,
             )

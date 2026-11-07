@@ -130,7 +130,6 @@ internal fun BikeConnectionScreen(
         item {
             ScreenHeader(
                 title = "Bike link",
-                subtitle = "Manage the Bluetooth link, battery/signal mirroring and connection diagnostics.",
             )
         }
 

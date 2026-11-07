@@ -59,8 +59,7 @@ internal fun TripHistoryScreen(
             ScreenHeader(
                 eyebrow = "Ride log",
                 title = "Trips",
-                subtitle = "Manual, local-only records. Enter the odometer from your bike; trips are " +
-                    "not recorded over Bluetooth or synced to the cloud.",
+                subtitle = "Enter the odometer from your bike.",
             )
         }
         item { LocalDataStatus(state, onClearError, onRetry) }

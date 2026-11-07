@@ -65,7 +65,7 @@ internal fun HomeScreen(
             detail = if (state.activeTrip != null) {
                 "A manual trip is in progress."
             } else {
-                "Manually record start and end odometer readings. Local only; live cluster data is not decoded yet."
+                "Manually record start and end odometer readings."
             },
             actionLabel = "View trips",
             onAction = onTrips,
