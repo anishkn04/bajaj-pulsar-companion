@@ -15,6 +15,41 @@ The app has a deliberately small, verified Bluetooth foundation:
 Selection and the auto-connect flag are stored app-private per VIN. Bluetooth addresses are
 not logged, exported or backed up.
 
+## Verified link and truthful readiness
+
+GATT service discovery can be answered from Android's cache in a few milliseconds, while LE
+encryption for a bonded cluster is still completing. Treating that cached result as "connected"
+produced false `Connected`/`Sending` states and a dropped first ATT request
+(`smp_link_encrypted: SMP state machine busy`, `BTM_SetEncryption busy`).
+
+The link is therefore verified before it is reported:
+
+1. After service discovery, wait a short encryption settle window
+   (`DEFAULT_HANDSHAKE_SETTLE_MILLIS`, 1 500 ms in production; 0 in unit tests).
+2. Probe the ATT layer with a real `requestMtu(146)` request, bounded by
+   `DEFAULT_HANDSHAKE_TIMEOUT_MILLIS` (6 s). No payload is written by the probe.
+3. Publish `Connected` only if the probe succeeds and the negotiated MTU is at least
+   `REQUIRED_MTU` (58). A smaller MTU is a terminal `MtuTooSmall` failure and is not retried.
+4. Retry a failed or timed-out probe up to `DEFAULT_MAX_HANDSHAKE_ATTEMPTS` (3) with reconnect
+   backoff, then report `BleFailure.NotResponding`.
+5. A disconnect that happens during the probe follows the normal auto-reconnect policy rather
+   than counting as a silent probe failure.
+
+Closing a session calls `gatt.disconnect()` before `gatt.close()`, so a pending ATT
+transaction is cancelled immediately instead of occupying the stack until its 30 s response
+timeout.
+
+Mirroring is only reported as active after the sender confirms its **first successful write**.
+`PhoneStatusSender.hasSent` is reset for each run, so enabling mirroring, reconnecting, or
+resuming after a restart never claims "Sending" before the cluster has acknowledged a frame.
+CONTROL polling starts after that same first write, because early reads contend with the
+readiness probe and the first status write.
+
+The UI reflects this directly: the headline stays `Connecting…` until the probe succeeds,
+`Sending` appears only after the first confirmed write, and probe exhaustion or repeated
+disconnects shows `Bike not responding` with a readable explanation instead of a raw failure
+`toString()`.
+
 ## Mirroring, background mode and boot resume
 
 Mirroring sends only the verified idle phone-status (battery/signal) frame to the cluster. It
@@ -37,7 +72,8 @@ Boot resume is handled by `BootReceiver` on `BOOT_COMPLETED`. It starts `BikeLin
 
 ## CONTROL polling (read-only diagnostics)
 
-When connected and mirroring is on, the cluster's CONTROL characteristic (`0a10676e-6972-6565-6e69-676e4543544f`) is polled every 700 ms. Each poll is a 20-byte read; the response is 26 bytes. This is **read only** — no actions are transmitted. Values are button counters and are surfaced in the Bike link screen's CONTROL diagnostics card.
+When connected, mirroring is on and the first status write has been confirmed, the cluster's
+CONTROL characteristic (`0a10676e-6972-6565-6e69-676e4543544f`) is polled every 700 ms. Each poll is a 20-byte read; the response is 26 bytes. This is **read only** — no actions are transmitted. Values are button counters and are surfaced in the Bike link screen's CONTROL diagnostics card.
 
 CONTROL map (zero-based offsets):
 
@@ -72,7 +108,10 @@ frames remain disabled until a live non-idle capture confirms the cluster accept
 Regression tests cover cancellation cleanup, stale discovery callbacks, permission
 and adapter changes during reconnect backoff, changing the reconnect preference,
 per-VIN isolation, Android GATT discovery/disconnect handoff, MTU negotiation,
-stale MTU callbacks, oversized-write rejection, battery/signal source permission
+stale MTU callbacks, disconnect-before-close ordering, readiness-probe gating
+(no `Connected` while probing), encryption settle ordering, bounded probe retry
+and `NotResponding`, first-write gating for mirroring and CONTROL polling,
+truthful status text, oversized-write rejection, battery/signal source permission
 changes, sender cadence/heartbeat wrapping, opt-in lifecycle stops, background
 mirroring defaults, boot resume gating, and service start/stop lifecycle.
 
