@@ -103,6 +103,17 @@ class AndroidBleTransportTest {
     }
 
     @Test
+    fun `closing a session disconnects before closing the gatt client`() = runBlocking {
+        val session = withTimeout(2_000) { transport.connect(target) }
+
+        session.close()
+
+        assertEquals(1, platform.disconnectCalls)
+        assertEquals(1, platform.closeCalls)
+        assertEquals(listOf("disconnect", "close"), platform.lifecycleCalls)
+    }
+
+    @Test
     fun `core shows discovering and owns discovery timeout and close`() = runBlocking {
         val connection = BikeConnection(
             transport, this,
@@ -429,6 +440,8 @@ class AndroidBleTransportTest {
 
         var discoveryCalls = 0
         var closeCalls = 0
+        var disconnectCalls = 0
+        val lifecycleCalls = mutableListOf<String>()
         var discoveryAccepted = true
         var discoveredServices: List<BluetoothGattService> = emptyList()
         var onDiscover: () -> Unit = {}
@@ -471,8 +484,16 @@ class AndroidBleTransportTest {
         }
 
         @Implementation
+        override fun disconnect() {
+            disconnectCalls++
+            lifecycleCalls += "disconnect"
+            super.disconnect()
+        }
+
+        @Implementation
         override fun close() {
             closeCalls++
+            lifecycleCalls += "close"
             super.close()
         }
     }

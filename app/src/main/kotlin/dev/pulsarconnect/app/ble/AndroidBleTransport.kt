@@ -129,6 +129,11 @@ class AndroidBleTransport(
             ).also { callback.session = it }
         } catch (error: Exception) {
             try {
+                gatt.disconnect()
+            } catch (_: Exception) {
+                // Already disconnected.
+            }
+            try {
                 gatt.close()
             } catch (_: Exception) {
                 // Already closed.
@@ -358,6 +363,7 @@ private class AndroidBleSession(
     @SuppressLint("MissingPermission")
     override suspend fun requestMtu(mtu: Int): Int {
         require(mtu in DEFAULT_ATT_MTU..MAX_ATT_MTU) { "MTU must be between $DEFAULT_ATT_MTU and $MAX_ATT_MTU" }
+        if (disconnected.isCompleted) disconnected.await()
         negotiatedMtu?.let { if (it >= mtu) return it }
 
         return operationMutex.withLock {
@@ -427,6 +433,13 @@ private class AndroidBleSession(
         pending = null
         pendingMtu?.completeExceptionally(failure)
         pendingMtu = null
+        try {
+            // Close alone leaves a pending ATT transaction on the stack until its 30 s response
+            // timeout. Disconnecting first cancels it and tears the ACL down immediately.
+            gatt.disconnect()
+        } catch (_: Exception) {
+            // Already disconnected or the stack went away.
+        }
         try {
             gatt.close()
         } catch (_: Exception) {
