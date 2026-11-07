@@ -61,7 +61,11 @@ class AppContainer(context: Context) {
     val bikeDevices: BikeDeviceStore = AndroidBikeDeviceStore(context.applicationContext)
     val bleScanSource: BleScanSource = AndroidBleScanner(context.applicationContext)
     val bleTransport = AndroidBleTransport(context.applicationContext)
-    val bikeConnection = BikeConnection(bleTransport, appScope)
+    val bikeConnection = BikeConnection(
+        bleTransport,
+        appScope,
+        handshakeSettleMillis = BikeConnection.DEFAULT_HANDSHAKE_SETTLE_MILLIS,
+    )
     val phoneStatusSource: PhoneStatusSource = AndroidPhoneStatusSource(context.applicationContext)
 
     /** Persistent bike-link intent (mirroring, background, boot, armed VIN). */

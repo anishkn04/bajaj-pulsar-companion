@@ -68,6 +68,7 @@ sealed interface BleFailure {
     data class ConnectTimeout(val millis: Long) : BleFailure
     data class DiscoveryTimeout(val millis: Long) : BleFailure
     data class DiscoveryFailed(val reason: String) : BleFailure
+    data object NotResponding : BleFailure
     data class GattError(val operation: String, val status: Int) : BleFailure
     data class MtuTooSmall(val required: Int, val negotiated: Int) : BleFailure
     data class Disconnected(val status: Int) : BleFailure

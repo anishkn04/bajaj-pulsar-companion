@@ -16,6 +16,11 @@ class FakeBleTransport : BleTransport {
     var servicesFailure: Throwable? = null
     var servicesAction: (suspend () -> List<BleService>)? = null
     var readResponse: ByteArray = ByteArray(0)
+    var negotiatedMtu: Int = PhoneStatusProtocol.PREFERRED_MTU
+    var mtuFailure: Throwable? = null
+    var mtuDelayMillis: Long = 0
+    var mtuAction: (suspend () -> Int)? = null
+    var writeAction: (suspend () -> Unit)? = null
 
     val sessions = mutableListOf<FakeBleSession>()
     var connectCalls: Int = 0
@@ -61,12 +66,16 @@ class FakeBleSession(
         return transport.readResponse.copyOf()
     }
 
-    var negotiatedMtu: Int = PhoneStatusProtocol.PREFERRED_MTU
-    var mtuFailure: Throwable? = null
+    var negotiatedMtu: Int = transport.negotiatedMtu
+    var mtuFailure: Throwable? = transport.mtuFailure
+    var mtuDelayMillis: Long = transport.mtuDelayMillis
+    var mtuAction: (suspend () -> Int)? = transport.mtuAction
     val mtuRequests = mutableListOf<Int>()
 
     override suspend fun requestMtu(mtu: Int): Int {
         mtuRequests += mtu
+        mtuAction?.let { return it() }
+        if (mtuDelayMillis > 0) delay(mtuDelayMillis)
         mtuFailure?.let { throw it }
         return negotiatedMtu
     }
@@ -79,7 +88,7 @@ class FakeBleSession(
     )
 
     val writes = mutableListOf<Write>()
-    var writeAction: (suspend () -> Unit)? = null
+    var writeAction: (suspend () -> Unit)? = transport.writeAction
 
     override suspend fun write(
         service: UUID,

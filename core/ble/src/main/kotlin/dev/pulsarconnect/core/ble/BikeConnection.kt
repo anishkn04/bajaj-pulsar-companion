@@ -39,13 +39,23 @@ sealed interface ConnectionState {
     ) : ConnectionState
 }
 
-/** Connection/reconnect state machine with opt-in, capability-checked idle phone-status writes. */
+/**
+ * Connection/reconnect state machine with opt-in, capability-checked idle phone-status writes.
+ *
+ * [ConnectionState.Connected] is published only after a readiness probe
+ * ([BleSession.requestMtu]) succeeds, so a cached GATT discovery alone never claims a live link.
+ * Production passes [DEFAULT_HANDSHAKE_SETTLE_MILLIS] so a bonded cluster can finish LE
+ * encryption before the first ATT request; tests leave the settle at zero for deterministic time.
+ */
 class BikeConnection(
     private val transport: BleTransport,
     private val scope: CoroutineScope,
     private val clock: () -> Long = System::currentTimeMillis,
     private val connectTimeoutMillis: Long = DEFAULT_CONNECT_TIMEOUT_MILLIS,
     private val discoveryTimeoutMillis: Long = DEFAULT_DISCOVERY_TIMEOUT_MILLIS,
+    private val handshakeSettleMillis: Long = 0,
+    private val handshakeTimeoutMillis: Long = DEFAULT_HANDSHAKE_TIMEOUT_MILLIS,
+    private val maxHandshakeAttempts: Int = DEFAULT_MAX_HANDSHAKE_ATTEMPTS,
     private val reconnectDelaysMillis: List<Long> = DEFAULT_RECONNECT_DELAYS,
     private val maxReconnectAttempts: Int = DEFAULT_MAX_RECONNECT_ATTEMPTS,
     private val stableConnectionMillis: Long = DEFAULT_STABLE_CONNECTION_MILLIS,
@@ -56,6 +66,9 @@ class BikeConnection(
     init {
         require(connectTimeoutMillis > 0) { "Connect timeout must be positive" }
         require(discoveryTimeoutMillis > 0) { "Discovery timeout must be positive" }
+        require(handshakeSettleMillis >= 0) { "Handshake settle delay must be nonnegative" }
+        require(handshakeTimeoutMillis > 0) { "Handshake timeout must be positive" }
+        require(maxHandshakeAttempts >= 1) { "At least one handshake attempt is required" }
         require(reconnectDelaysMillis.isNotEmpty()) { "At least one reconnect delay is required" }
         require(reconnectDelaysMillis.all { it >= 0 }) { "Reconnect delays must be nonnegative" }
         require(maxReconnectAttempts >= 0) { "Reconnect attempt limit must be nonnegative" }
@@ -185,6 +198,7 @@ class BikeConnection(
     ) {
         val target = run.target
         var attempt = 0
+        var handshakeFailures = 0
         while (version == generation) {
             currentCoroutineContext().ensureActive()
 
@@ -278,6 +292,74 @@ class BikeConnection(
                 closeSession(newSession)
                 return
             }
+
+            // Discovery can be served from Android's cache in milliseconds, while LE encryption
+            // is still completing. A request sent during the SMP handshake can be dropped by
+            // the cluster, so settle briefly and then prove the ATT layer is live before
+            // claiming a link. No payload is written here.
+            if (handshakeSettleMillis > 0) delay(handshakeSettleMillis)
+            if (version != generation) {
+                closeSession(newSession)
+                return
+            }
+            val probeMtu = try {
+                withTimeout(handshakeTimeoutMillis) {
+                    newSession.requestMtu(PhoneStatusProtocol.PREFERRED_MTU)
+                }
+            } catch (timeout: TimeoutCancellationException) {
+                closeSession(newSession)
+                handshakeFailures++
+                if (handshakeFailures >= maxHandshakeAttempts) {
+                    publish(version, ConnectionState.Failed(target, BleFailure.NotResponding))
+                    return
+                }
+                attempt++
+                continue
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Exception) {
+                closeSession(newSession)
+                val disconnected = (error as? BleException)?.failure as? BleFailure.Disconnected
+                if (disconnected != null) {
+                    // The link ended while it was being verified. Follow the same policy as a
+                    // post-connection drop instead of treating it as a silent probe failure.
+                    if (!run.autoReconnect) {
+                        publish(version, ConnectionState.Failed(target, disconnected))
+                        return
+                    }
+                    attempt++
+                    if (attempt > maxReconnectAttempts) {
+                        publish(
+                            version,
+                            ConnectionState.Failed(
+                                target,
+                                BleFailure.TooManyAttempts(maxReconnectAttempts),
+                            ),
+                        )
+                        return
+                    }
+                    continue
+                }
+                handshakeFailures++
+                if (handshakeFailures >= maxHandshakeAttempts) {
+                    publish(version, ConnectionState.Failed(target, BleFailure.NotResponding))
+                    return
+                }
+                attempt++
+                continue
+            }
+            if (probeMtu < PhoneStatusProtocol.REQUIRED_MTU) {
+                closeSession(newSession)
+                publish(
+                    version,
+                    ConnectionState.Failed(
+                        target,
+                        BleFailure.MtuTooSmall(PhoneStatusProtocol.REQUIRED_MTU, probeMtu),
+                    ),
+                )
+                return
+            }
+            handshakeFailures = 0
 
             publish(version, ConnectionState.Connected(target, services, clock()))
             val connectedAt = clock()
@@ -397,6 +479,9 @@ class BikeConnection(
     companion object {
         const val DEFAULT_CONNECT_TIMEOUT_MILLIS: Long = 15_000
         const val DEFAULT_DISCOVERY_TIMEOUT_MILLIS: Long = 15_000
+        const val DEFAULT_HANDSHAKE_SETTLE_MILLIS: Long = 1_500
+        const val DEFAULT_HANDSHAKE_TIMEOUT_MILLIS: Long = 6_000
+        const val DEFAULT_MAX_HANDSHAKE_ATTEMPTS: Int = 3
         const val DEFAULT_MAX_RECONNECT_ATTEMPTS: Int = 10
         const val DEFAULT_STABLE_CONNECTION_MILLIS: Long = 60_000
         val DEFAULT_RECONNECT_DELAYS: List<Long> = listOf(1_000, 2_000, 4_000, 8_000, 16_000, 30_000)

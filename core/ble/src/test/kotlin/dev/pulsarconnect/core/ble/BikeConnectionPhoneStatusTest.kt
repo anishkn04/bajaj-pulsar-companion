@@ -56,10 +56,12 @@ class BikeConnectionPhoneStatusTest {
         fake.services = supportedServices()
         val connection = connection()
         connect(connection)
+        // The readiness probe already negotiated the payload MTU to reach Connected.
+        assertEquals(listOf(PhoneStatusProtocol.PREFERRED_MTU), fake.latestSession.mtuRequests)
 
         assertTrue(connection.sendPhoneStatus(status, 1))
 
-        assertEquals(listOf(PhoneStatusProtocol.PREFERRED_MTU), fake.latestSession.mtuRequests)
+        assertEquals(2, fake.latestSession.mtuRequests.size)
         assertEquals(1, fake.latestSession.writes.size)
     }
 
