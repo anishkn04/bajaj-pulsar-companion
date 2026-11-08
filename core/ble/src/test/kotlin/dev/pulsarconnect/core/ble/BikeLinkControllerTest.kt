@@ -412,6 +412,28 @@ class BikeLinkControllerTest {
 
         assertEquals(vin, controller.state.value.vin)
         assertEquals(1, fake.connectCalls)
+        assertTrue(controller.state.value.settings.mirroring)
+        assertTrue(controller.state.value.mirroringActive)
+    }
+
+    @Test
+    fun `a saved mirroring preference survives the first sign in of a new process`() = runTest {
+        devices.select(target)
+        val preferences = InMemoryBikeLinkPreferences(
+            BikeLinkSettings(
+                mirroring = true,
+                keepInBackground = true,
+                startOnBoot = true,
+                armedVin = vin,
+            ),
+        )
+        val (controller, _) = controller(preferences)
+
+        controller.onSession(vin)
+        runCurrent()
+
+        assertTrue(preferences.settings.value.mirroring)
+        assertEquals(vin, controller.state.value.vin)
         assertTrue(controller.state.value.mirroringActive)
     }
 
