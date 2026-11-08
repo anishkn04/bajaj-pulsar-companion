@@ -49,8 +49,9 @@ background mode and boot resume.
   inventing chunking.
 - **Battery** needs no permission. **Cellular signal** additionally needs optional phone-state
   permission; without it, or without telephony support, battery still mirrors and signal is sent
-  as unavailable. The app never reads contacts, call logs, phone numbers, SMS, or message
-  content.
+  as unavailable. The app never reads contacts, call logs, SMS, or message content. With the
+  opt-in call features it reads only the dialer notification's display label, and discards any
+  phone-shaped value without sending or storing it.
 - A peer that does not expose the writable GENERAL characteristic is shown as incompatible, and
   nothing is sent.
 
@@ -59,9 +60,12 @@ characteristic is polled every 700 ms (20-byte read, 26-byte response). Button c
 shown in the Bike link diagnostics card. No actions are transmitted.
 
 The frame format comes from the official Android APK's native encoder, not its iOS JavaScript
-path. Only the idle battery/signal subset is enabled. Caller names and missed-call indication
-are deliberately **disabled** until a live non-idle capture confirms the cluster accepts them;
-see [the BLE notes](docs/recon/BLE.md).
+path. The idle battery/signal subset is enabled by default. Two call features are **opt-in and
+off by default**: an incoming caller's display name and a fixed missed-call icon. Both read only
+the dialer notification through notification access, never contacts or call logs, and never send
+a phone number; unnamed callers become `Incoming call`. Their frames are implemented but still
+await a live capture, so hardware support is not yet claimed; see
+[the BLE notes](docs/recon/BLE.md).
 
 ## Background service alerts
 
@@ -124,7 +128,7 @@ This does not establish why the official app exhibits the reported login problem
 ## Still planned
 
 - **Bluetooth protocol decoding:** live cluster telemetry and automatic trip capture. Blocked on a targeted HCI snoop capture with the bike switched on; see [the BLE capture guide](docs/recon/BLE.md). No protocol is invented here.
-- **Caller and missed-call mirroring:** static frame layouts were recovered, but no live non-idle frames have been captured, so these stay disabled.
+- **Caller and missed-call mirroring:** implemented behind opt-in switches, but no live non-idle frames have been captured yet, so cluster support is still unverified.
 - Cloud trip sync, export/restore and navigation integration.
 - On-device testing with the bike and a connected Android phone, including a smoke test of background mirroring and boot resume on real hardware.
 

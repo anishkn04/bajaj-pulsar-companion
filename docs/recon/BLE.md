@@ -52,17 +52,24 @@ disconnects shows `Bike not responding` with a readable explanation instead of a
 
 ## Mirroring, background mode and boot resume
 
-Mirroring sends only the verified idle phone-status (battery/signal) frame to the cluster. It
-is **on by default** on a fresh install, but remains **session-scoped**: it stops when the
-rider signs out, switches VIN, disconnects, or turns mirroring off.
+Mirroring sends the phone-status (battery/signal) frame to the cluster, plus the
+opt-in caller-name and missed-call fields described below. It is **on by default**
+on a fresh install, but remains **session-scoped**: it stops when the rider signs
+out, switches VIN, disconnects, or turns mirroring off.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| Mirror phone status to cluster | on | Sends the idle battery/signal frame about once per second. |
+| Mirror phone status to cluster | on | Sends the battery/signal frame about once per second. |
 | Keep mirroring in background | on | Runs a `connectedDevice` foreground service so mirroring survives leaving the app. |
 | Resume mirroring after reboot | on | Auto-starts the link after boot when mirroring + background are both on and a bike is selected. |
+| Caller name | off | Adds an incoming caller's display name to the GENERAL frame. |
+| Missed-call icon | off | Sends one fixed MISS_CALL frame per missed call. |
 
-`runsInBackground = mirroring && keepInBackground`. `resumesAfterBoot = startOnBoot && runsInBackground && armedVin != null`. With all defaults on and a bike selected, `resumesAfterBoot` is true.
+`runsInBackground = mirroring && keepInBackground`. `resumesAfterBoot = startOnBoot && runsInBackground && armedVin != null`. With the mirroring defaults on and a bike selected, `resumesAfterBoot` is true.
+
+The two call features are **opt-in and off by default**. They are independent of the
+battery/signal switch: turning mirroring off stops every frame, but enabling a call
+feature never turns on anything else.
 
 The foreground service runs only while mirroring is active and background mode is on. It stops when mirroring is turned off, when background mode is turned off, or when the notification stop action is tapped. If notification permission is denied, the service still runs but no notification is shown — an in-app warning appears in Settings.
 
@@ -94,8 +101,46 @@ CONTROL map (zero-based offsets):
 | `[12]` | Alert read |
 | `[13]` | Launch media |
 
-Only verified frames may be transmitted. Caller name, missed-call, alert and turn-by-turn
-frames remain disabled until a live non-idle capture confirms the cluster accepts them.
+Only verified frames may be transmitted. Caller name and missed-call frames are
+implemented and opt-in (see the next section), but still need a live capture to
+confirm the cluster accepts them. Alert and turn-by-turn frames are not
+implemented at all: the official Android app does not expose them as features.
+
+## Call mirroring and privacy
+
+The official Android app's native encoder defines two call features, and this app
+implements only those two:
+
+- **Incoming caller name.** The caller's display name is written into the GENERAL
+  frame while the phone is ringing or the call is active. No number is ever sent.
+- **Missed-call icon.** One fixed 74-byte MISS_CALL frame is written after a missed
+  call. It contains no name, number or history.
+
+Privacy model:
+
+- Both switches default to off and are separate from the battery/signal switch.
+- Call data comes from a `NotificationListenerService` reading only the dialer's
+  call notification. The app requests neither `READ_CONTACTS` nor `READ_CALL_LOG`.
+- The dialer package allowlist is the active default dialer plus stock OEM dialers;
+  notifications from every other app are ignored.
+- Only a display label may leave the parser. Phone-shaped values, generic labels
+  (`Incoming call`, `Unknown`, `Private number`, …) and overlong labels collapse
+  to the protocol fallback `Incoming call`; the wire path has no number fallback.
+- `READ_PHONE_STATE` (already optional for signal strength) is also used to tell
+  an incoming RINGING call from an outgoing call. Without it, caller-name mirroring
+  stays unavailable; missed-call detection still works from the notification alone.
+- Events that arrive while the link is down are dropped, not replayed. Nothing is
+  logged or persisted.
+- Turning mirroring off, signing out or disconnecting stops collection; the sender
+  cancels its flow and the platform listener is unregistered.
+
+On the wire, the caller fields are byte 20 (UTF-8 length, capped at 30 bytes on a
+code-point boundary) and bytes 21-50, with zero padding. `CallState` occupies the low
+three bits of byte 1 (`0` none, `1` incoming, `2` outgoing, `3` active, `4` end);
+only an active call sets byte 3 to `1` and byte 4 to `0`. The missed-call frame is
+byte 0 `1` followed by 73 zero bytes. MISS_CALL needs a 77-byte MTU; GENERAL needs
+58. If the peer does not expose a writable MISS_CALL endpoint or the MTU is too
+small, that one frame is skipped without stopping normal mirroring.
 
 ## Automated validation
 
@@ -113,7 +158,9 @@ stale MTU callbacks, disconnect-before-close ordering, readiness-probe gating
 and `NotResponding`, first-write gating for mirroring and CONTROL polling,
 truthful status text, oversized-write rejection, battery/signal source permission
 changes, sender cadence/heartbeat wrapping, opt-in lifecycle stops, background
-mirroring defaults, boot resume gating, and service start/stop lifecycle.
+mirroring defaults, boot resume gating, service start/stop lifecycle, call-state
+and caller-field encoding, name sanitization/truncation, missed-call priority and
+capability checks, dialer allowlisting, and notification privacy filters.
 
 These tests use fake transports and Robolectric, not a real motorcycle. They do
 not establish hardware compatibility or validate cluster rendering.
@@ -171,19 +218,21 @@ connections. All 151 match the idle layout above byte-for-byte, including zero
 bytes 5-52, heartbeat in byte 53, and byte 54 zero. This validates the idle
 subset only; it does not prove receiver behaviour for other firmware variants.
 
-## What remains disabled
+## Call frames: implemented, hardware verification pending
 
-The native code also contains static layouts for call and missed-call frames, but
-the available capture has no non-idle caller or missed-call frames. The app does
-not transmit them:
+The call layouts come from the native encoder's static analysis. The app now
+encodes and transmits them behind the opt-in switches above, but the available
+capture has no non-idle caller or missed-call frames. Hardware behaviour is
+therefore still unverified:
 
-- MISS_CALL (`0310676e-6972-6565-6e69-676e4543544f`) is 74 bytes.
-- ALERT (`0410676e-6972-6565-6e69-676e4543544f`) is 40 bytes.
+- MISS_CALL (`0310676e-6972-6565-6e69-676e4543544f`) is a 74-byte fixed trigger.
 - GENERAL caller text occupies byte 20 (UTF-8 length, capped at 30) and bytes
-  21-50 in the native static analysis.
+  21-50; the remaining bytes stay zero.
+- ALERT (`0410676e-6972-6565-6e69-676e4543544f`) remains unimplemented.
 
-Those layouts are research notes, not enabled features. Caller names and missed
-calls stay off until a live non-idle capture confirms the cluster accepts them.
+Do not claim cluster support for caller names or missed calls until the capture in
+the next section confirms it. The app must never substitute a phone number for a
+missing name; unnamed callers get the generic `Incoming call` label.
 
 Live speed/RPM/fuel/gear telemetry is still not established. The capture's ACTION
 characteristic (`0a10676e-6972-6565-6e69-676e4543544f`) returns 26-byte read
@@ -196,11 +245,12 @@ must not be hardcoded. Classic Bluetooth HFP and OBEX exchanges also appear on
 another connection; their ownership has not been established, so they must not be
 attributed to the bike or used as proof of its call/contacts protocol.
 
-## Needed capture: non-idle phone status
+## Needed capture: live call verification
 
 A new HCI snoop log should capture an incoming call while the official Android app
 is connected to the bike. Do not publish caller names, phone numbers or raw
-payloads.
+payloads. This is the remaining gate before the call features can be described as
+working on hardware.
 
 1. On the Android phone, enable **Developer options → Enable Bluetooth HCI snoop log**.
 2. Turn the bike ignition and kill switch on. Keep the bike stationary and in
