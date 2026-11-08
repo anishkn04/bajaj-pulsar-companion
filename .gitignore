@@ -19,6 +19,9 @@ local.properties
 *.p12
 *.pem
 
+# --- Signing configuration (secrets only, never committed) ---
+keystore.properties
+
 # --- Capture artifacts (contain VIN, tokens, coordinates) ---
 captures/
 *.har

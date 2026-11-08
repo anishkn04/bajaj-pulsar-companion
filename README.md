@@ -91,6 +91,26 @@ Requires JDK 21, Android SDK 36 and a configured `local.properties` or `ANDROID_
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
+## Versioning and releases
+
+The project uses [Semantic Versioning](https://semver.org/) (`<major>.<minor>.<patch>`). The version lives in one place:
+
+- `gradle.properties` — `project.version` (`versionName`) and `project.versionCode` (Play Store upload code). Bump both on every release.
+
+CI/CD runs on GitHub Actions:
+
+- **`.github/workflows/ci.yml`** — on every push/PR to `main`: unit tests, debug build, and lint.
+- **`.github/workflows/release.yml`** — on every `v*` tag push: tests, lint, signed release APK + AAB, then a GitHub Release with assets and a changelog generated from conventional commits since the previous tag.
+
+To cut a release:
+
+```sh
+git tag -a v0.1.1 -m "v0.1.1"
+git push origin v0.1.1
+```
+
+Release signing uses a keystore provided only through GitHub Actions secrets (`RELEASE_KEYSTORE_B64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`). Keystores and `keystore.properties` are never committed. Never include real VINs, access codes, tokens, or captures in releases.
+
 Core tests use JUnit 5. App tests use JUnit 4, Robolectric and WorkManager's test helpers, including native SQLite, notification permission/channel behavior, persistent delivery suppression, sign-out races, and overlapping-work scheduling on API 26 and 35. The first test run needs network access for dependencies and Robolectric's Android SDK jars; Gradle's `--offline` does not control Robolectric's separate SDK resolver. Sandboxed runs also need a writable Java `user.home` for Robolectric's lock/cache, and a writable Gradle cache.
 
 Tests use synthetic credentials and deterministic clocks. No motorcycle or live Bajaj account is needed. The BLE suite additionally covers MTU negotiation, oversized-write rejection, battery/signal source behavior, sender cadence, and the opt-in lifecycle using fake transports and Robolectric. These tests do **not** establish real-bike compatibility or prove how the cluster renders values.
