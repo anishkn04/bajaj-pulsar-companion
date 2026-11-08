@@ -31,7 +31,8 @@ background mode and boot resume.
 
 - **Mirror phone status to cluster** (on by default): sends a 55-byte idle phone-status write
   about once per second; the heartbeat wraps from 255 to 0. It stops when you sign out, switch
-  VIN, disconnect, or turn the switch off. Returning to the foreground requires a fresh opt-in
+  VIN, disconnect, or turn the switch off. The preference is remembered across ordinary app
+  restarts. Returning to the foreground requires a fresh opt-in
   if background mode is off.
 - **Keep mirroring in background** (on by default): runs a `connectedDevice` foreground service
   so mirroring survives leaving the app. Stops when you turn mirroring off. If notification

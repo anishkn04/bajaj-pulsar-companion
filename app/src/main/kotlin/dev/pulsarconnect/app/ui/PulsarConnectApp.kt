@@ -60,7 +60,7 @@ fun PulsarConnectApp(viewModel: AppViewModel, bleViewModel: BleViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
     LaunchedEffect(state) {
-        if (state !is UiState.SignedIn) bleViewModel.signOut()
+        if (shouldDisarmBikeLink(state)) bleViewModel.signOut()
     }
 
     Surface(
@@ -283,6 +283,12 @@ private fun PulsarNavigationBar(
         }
     }
 }
+
+/**
+ * Only an explicit sign-out clears the persisted bike-link intent. The transient loading state
+ * and ordinary signed-in starts must keep the rider's mirroring preference across restarts.
+ */
+internal fun shouldDisarmBikeLink(state: UiState): Boolean = state is UiState.SignedOut
 
 internal fun bleStatusValue(connection: ConnectionState): String = when (connection) {
     ConnectionState.Idle -> "Not connected"
