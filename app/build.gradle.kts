@@ -1,4 +1,5 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
@@ -15,8 +16,22 @@ android {
         applicationId = "dev.pulsarconnect.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = (project.findProperty("project.versionCode") as? String ?: "1").toInt()
+        versionName = (project.findProperty("project.version") as? String ?: "0.1.0-SNAPSHOT")
+    }
+
+    signingConfigs {
+        create("release") {
+            val propsFile = rootProject.file("keystore.properties")
+            if (propsFile.exists()) {
+                val props = Properties()
+                propsFile.inputStream().use { props.load(it) }
+                storeFile = rootProject.file(props.getProperty("keystore.path", "app/release-keystore.jks"))
+                storePassword = props.getProperty("keystore.password", "")
+                keyAlias = props.getProperty("key.alias", "")
+                keyPassword = props.getProperty("key.password", "")
+            }
+        }
     }
 
     buildTypes {
@@ -26,6 +41,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
