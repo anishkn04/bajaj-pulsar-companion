@@ -102,9 +102,9 @@ CONTROL map (zero-based offsets):
 | `[13]` | Launch media |
 
 Only verified frames may be transmitted. Caller name and missed-call frames are
-implemented and opt-in (see the next section), but still need a live capture to
-confirm the cluster accepts them. Alert and turn-by-turn frames are not
-implemented at all: the official Android app does not expose them as features.
+implemented, opt-in, and were confirmed on a live bike (see below). Alert and
+turn-by-turn frames are not implemented at all: the official Android app does not
+expose them as features.
 
 ## Call mirroring and privacy
 
@@ -163,7 +163,9 @@ and caller-field encoding, name sanitization/truncation, missed-call priority an
 capability checks, dialer allowlisting, and notification privacy filters.
 
 These tests use fake transports and Robolectric, not a real motorcycle. They do
-not establish hardware compatibility or validate cluster rendering.
+not establish hardware compatibility or validate cluster rendering on their own.
+A manual live test on the bike additionally confirmed caller-name and
+missed-call rendering with both opt-in switches on.
 
 ## Verified Android phone-status subset
 
@@ -218,21 +220,24 @@ connections. All 151 match the idle layout above byte-for-byte, including zero
 bytes 5-52, heartbeat in byte 53, and byte 54 zero. This validates the idle
 subset only; it does not prove receiver behaviour for other firmware variants.
 
-## Call frames: implemented, hardware verification pending
+## Call frames: live-verified
 
-The call layouts come from the native encoder's static analysis. The app now
-encodes and transmits them behind the opt-in switches above, but the available
-capture has no non-idle caller or missed-call frames. Hardware behaviour is
-therefore still unverified:
+The call layouts come from the native encoder's static analysis. A live test on
+the bike, with both opt-in switches on, confirmed two behaviours:
+
+- the cluster showed the incoming caller's display name while the phone rang;
+- the cluster showed the missed-call icon after an unanswered call.
+
+This is behavioural confirmation, not a raw-frame capture. The bytes on the wire
+still follow the native static layout:
 
 - MISS_CALL (`0310676e-6972-6565-6e69-676e4543544f`) is a 74-byte fixed trigger.
 - GENERAL caller text occupies byte 20 (UTF-8 length, capped at 30) and bytes
   21-50; the remaining bytes stay zero.
 - ALERT (`0410676e-6972-6565-6e69-676e4543544f`) remains unimplemented.
 
-Do not claim cluster support for caller names or missed calls until the capture in
-the next section confirms it. The app must never substitute a phone number for a
-missing name; unnamed callers get the generic `Incoming call` label.
+The app must never substitute a phone number for a missing name; unnamed callers
+get the generic `Incoming call` label.
 
 Live speed/RPM/fuel/gear telemetry is still not established. The capture's ACTION
 characteristic (`0a10676e-6972-6565-6e69-676e4543544f`) returns 26-byte read
@@ -245,12 +250,12 @@ must not be hardcoded. Classic Bluetooth HFP and OBEX exchanges also appear on
 another connection; their ownership has not been established, so they must not be
 attributed to the bike or used as proof of its call/contacts protocol.
 
-## Needed capture: live call verification
+## Optional capture: call frames
 
-A new HCI snoop log should capture an incoming call while the official Android app
-is connected to the bike. Do not publish caller names, phone numbers or raw
-payloads. This is the remaining gate before the call features can be described as
-working on hardware.
+The live test above confirms the cluster accepts the caller-name and missed-call
+frames, so this capture is no longer a gate for enabling the features. It would
+still document the exact bytes the official app transmits and expose any firmware
+variation. Do not publish caller names, phone numbers or raw payloads.
 
 1. On the Android phone, enable **Developer options → Enable Bluetooth HCI snoop log**.
 2. Turn the bike ignition and kill switch on. Keep the bike stationary and in

@@ -63,8 +63,9 @@ The frame format comes from the official Android APK's native encoder, not its i
 path. The idle battery/signal subset is enabled by default. Two call features are **opt-in and
 off by default**: an incoming caller's display name and a fixed missed-call icon. Both read only
 the dialer notification through notification access, never contacts or call logs, and never send
-a phone number; unnamed callers become `Incoming call`. Their frames are implemented but still
-await a live capture, so hardware support is not yet claimed; see
+a phone number; unnamed callers become `Incoming call`. **Both call features were
+confirmed on a live bike**: the cluster showed the incoming caller's display name
+while ringing and the missed-call icon after an unanswered call. See
 [the BLE notes](docs/recon/BLE.md).
 
 ## Background service alerts
@@ -128,7 +129,6 @@ This does not establish why the official app exhibits the reported login problem
 ## Still planned
 
 - **Bluetooth protocol decoding:** live cluster telemetry and automatic trip capture. Blocked on a targeted HCI snoop capture with the bike switched on; see [the BLE capture guide](docs/recon/BLE.md). No protocol is invented here.
-- **Caller and missed-call mirroring:** implemented behind opt-in switches, but no live non-idle frames have been captured yet, so cluster support is still unverified.
 - Cloud trip sync, export/restore and navigation integration.
 - On-device testing with the bike and a connected Android phone, including a smoke test of background mirroring and boot resume on real hardware.
 
