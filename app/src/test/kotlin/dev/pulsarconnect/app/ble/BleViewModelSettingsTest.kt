@@ -209,6 +209,36 @@ class BleViewModelSettingsTest {
         assertFalse(preferences.settings.value.resumesAfterBoot)
     }
 
+    @Test
+    fun `call mirroring defaults off and persists each opt-in toggle`() = runTest {
+        val preferences = InMemoryBikeLinkPreferences()
+        val viewModel = viewModel(preferences, FakeRuntime())
+        viewModel.onSession(vin)
+        runCurrent()
+
+        assertFalse(viewModel.state.value.callerNameEnabled)
+        assertFalse(viewModel.state.value.missedCallEnabled)
+        assertFalse(preferences.settings.value.mirrorCallerName)
+        assertFalse(preferences.settings.value.mirrorMissedCalls)
+        assertFalse(preferences.settings.value.mirrorsAnyCall)
+
+        viewModel.setMirrorCallerName(true)
+        runCurrent()
+        assertTrue(viewModel.state.value.callerNameEnabled)
+        assertTrue(preferences.settings.value.mirrorCallerName)
+        assertFalse(preferences.settings.value.mirrorMissedCalls)
+        assertTrue(preferences.settings.value.mirrorsAnyCall)
+
+        viewModel.setMirrorCallerName(false)
+        viewModel.setMirrorMissedCalls(true)
+        runCurrent()
+        assertFalse(viewModel.state.value.callerNameEnabled)
+        assertTrue(viewModel.state.value.missedCallEnabled)
+        assertFalse(preferences.settings.value.mirrorCallerName)
+        assertTrue(preferences.settings.value.mirrorMissedCalls)
+        assertTrue(preferences.settings.value.mirroring)
+    }
+
     private class FakeRuntime : BikeLinkRuntime {
         var enabled = false
             private set

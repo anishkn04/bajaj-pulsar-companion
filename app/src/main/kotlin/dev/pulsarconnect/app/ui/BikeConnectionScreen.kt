@@ -23,9 +23,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.PhoneMissed
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.Phone
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.TwoWheeler
@@ -70,6 +73,9 @@ internal fun BikeConnectionScreen(
     onAutoConnectChange: (Boolean) -> Unit,
     onClearSelection: () -> Unit,
     onPhoneStatusChange: (Boolean) -> Unit,
+    onCallerNameChange: (Boolean) -> Unit,
+    onMissedCallChange: (Boolean) -> Unit,
+    onOpenNotificationSettings: () -> Unit,
     onRefresh: () -> Unit,
     onClearError: () -> Unit,
 ) {
@@ -242,7 +248,7 @@ internal fun BikeConnectionScreen(
                 PulsarCard {
                     PulsarSwitchRow(
                         title = "Battery & signal",
-                        description = "Sends only the verified idle battery/signal frame. It never sends calls, contacts or messages.",
+                        description = "Sends only the verified idle battery/signal frame. Call mirroring is separate and opt-in.",
                         checked = bleState.phoneStatusEnabled,
                         onCheckedChange = onPhoneStatusChange,
                         enabled = bleState.phoneStatusAvailable,
@@ -292,6 +298,125 @@ internal fun BikeConnectionScreen(
                             message,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+            }
+
+            item {
+                // Call features ride on the same GENERAL link, so the main mirroring switch
+                // must be on as well. This keeps one obvious master switch.
+                val callBaseReady = bleState.phoneStatusAvailable &&
+                    bleState.phoneStatusEnabled && bleState.notificationAccessGranted
+                val callerReady = callBaseReady && phonePermissionGranted
+                val missedReady = callBaseReady && bleState.missedCallAvailable
+                PulsarCard {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Surface(
+                            modifier = Modifier.size(42.dp),
+                            shape = MaterialTheme.shapes.medium,
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center,
+                                modifier = Modifier.fillMaxSize(),
+                            ) {
+                                Icon(
+                                    Icons.Outlined.Phone,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(22.dp),
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                "Call mirroring",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                "Opt-in and off by default. Nothing is read until you enable a switch.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Icon(
+                            Icons.AutoMirrored.Outlined.PhoneMissed,
+                            contentDescription = null,
+                            modifier = Modifier.size(22.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+
+                    PulsarSwitchRow(
+                        title = "Caller name",
+                        description = "Shows the incoming caller's display name while the phone rings.",
+                        checked = bleState.callerNameEnabled,
+                        onCheckedChange = onCallerNameChange,
+                        enabled = callerReady,
+                    )
+                    PulsarSwitchRow(
+                        title = "Missed-call icon",
+                        description = "Sends the fixed cluster icon. No name, number or history is included.",
+                        checked = bleState.missedCallEnabled,
+                        onCheckedChange = onMissedCallChange,
+                        enabled = missedReady,
+                    )
+
+                    if (!bleState.notificationAccessGranted) {
+                        Text(
+                            "Notification access is off. Android requires this special access so the app can read the dialer's call notification without contacts or call-log permission.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        CardLink(
+                            label = "Allow notification access",
+                            onClick = onOpenNotificationSettings,
+                            icon = Icons.Outlined.Notifications,
+                        )
+                    } else {
+                        if (bleState.phoneStatusAvailable && !bleState.phoneStatusEnabled) {
+                            Text(
+                                "Turn on Battery & signal above to mirror calls.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        if (!bleState.callerNameAvailable) {
+                            Text(
+                                "This bike did not expose the phone-status endpoint, so caller names cannot be shown.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        } else if (!phonePermissionGranted) {
+                            Text(
+                                "Phone-state permission is needed to tell an incoming call from an outgoing one.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            CardLink(
+                                label = "Allow phone state",
+                                onClick = {
+                                    phonePermissionLauncher.launch(Manifest.permission.READ_PHONE_STATE)
+                                },
+                            )
+                        }
+                        if (!bleState.missedCallAvailable) {
+                            Text(
+                                "This bike did not expose the missed-call endpoint, so the icon cannot be sent.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Text(
+                            "Only the display name is sent, and an unknown caller becomes “Incoming call”. Numbers, contacts, messages and call history are never read or stored.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }

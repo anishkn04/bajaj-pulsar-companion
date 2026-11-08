@@ -50,6 +50,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.pulsarconnect.app.ble.BleUiState
 import dev.pulsarconnect.app.ble.BleViewModel
+import dev.pulsarconnect.app.ble.NotificationAccess
 import dev.pulsarconnect.core.ble.BleFailure
 import dev.pulsarconnect.core.ble.ConnectionState
 import dev.pulsarconnect.core.data.isDue
@@ -116,6 +117,7 @@ private fun SignedInScreen(
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_START -> bleViewModel.onForeground()
+                Lifecycle.Event.ON_RESUME -> bleViewModel.refreshNotificationAccess()
                 Lifecycle.Event.ON_STOP -> bleViewModel.onBackground()
                 else -> Unit
             }
@@ -192,6 +194,11 @@ private fun SignedInScreen(
                     onAutoConnectChange = bleViewModel::setAutoConnect,
                     onClearSelection = bleViewModel::clearSelection,
                     onPhoneStatusChange = bleViewModel::setMirroring,
+                    onCallerNameChange = bleViewModel::setMirrorCallerName,
+                    onMissedCallChange = bleViewModel::setMirrorMissedCalls,
+                    onOpenNotificationSettings = {
+                        runCatching { context.startActivity(NotificationAccess.settingsIntent()) }
+                    },
                     onRefresh = bleViewModel::onPermissionsChanged,
                     onClearError = bleViewModel::clearError,
                 )

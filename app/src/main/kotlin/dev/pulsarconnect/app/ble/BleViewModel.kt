@@ -39,6 +39,11 @@ data class BleUiState(
     val phoneStatusAvailable: Boolean = false,
     val phoneStatusSending: Boolean = false,
     val phoneStatusError: String? = null,
+    val callerNameEnabled: Boolean = false,
+    val missedCallEnabled: Boolean = false,
+    val callerNameAvailable: Boolean = false,
+    val missedCallAvailable: Boolean = false,
+    val notificationAccessGranted: Boolean = false,
     val settings: BikeLinkSettings = BikeLinkSettings(),
     val controlState: ClusterControlState = ClusterControlState(),
 )
@@ -65,9 +70,12 @@ class BleViewModel(
     private val runtime: BikeLinkRuntime,
 ) : ViewModel() {
 
+    private val appContext = application.applicationContext
+
     private val _state = MutableStateFlow(BleUiState(
         adapterState = transport.adapterState.value,
         missingPermissions = transport.missingPermissions(),
+        notificationAccessGranted = NotificationAccess.isGranted(appContext),
     ))
     val state: StateFlow<BleUiState> = _state.asStateFlow()
 
@@ -104,6 +112,10 @@ class BleViewModel(
                         phoneStatusAvailable = available,
                         phoneStatusSending = link.mirroringActive,
                         phoneStatusError = link.mirroringError,
+                        callerNameEnabled = link.settings.mirrorCallerName,
+                        missedCallEnabled = link.settings.mirrorMissedCalls,
+                        callerNameAvailable = link.callerMirroringAvailable,
+                        missedCallAvailable = link.missedCallMirroringAvailable,
                     )
                 }
             }
@@ -144,6 +156,7 @@ class BleViewModel(
 
     /** Foreground: resume the link when mirroring or auto-connect wants it. */
     fun onForeground() {
+        refreshNotificationAccess()
         controller.onForeground()
     }
 
@@ -165,7 +178,20 @@ class BleViewModel(
     /** Called after a permission dialog: refresh state and resume a link that was waiting. */
     fun onPermissionsChanged() {
         refreshPlatformState()
+        refreshNotificationAccess()
         controller.onForeground()
+    }
+
+    /**
+     * Re-reads the special notification-access grant. The system settings screen is outside the
+     * normal permission flow, so the UI calls this when it resumes.
+     */
+    fun refreshNotificationAccess() {
+        val granted = NotificationAccess.isGranted(appContext)
+        _state.update {
+            if (it.notificationAccessGranted == granted) it
+            else it.copy(notificationAccessGranted = granted)
+        }
     }
 
     fun scan() {
@@ -235,6 +261,16 @@ class BleViewModel(
 
     fun setStartOnBoot(enabled: Boolean) {
         controller.setStartOnBoot(enabled)
+    }
+
+    /** Opt-in caller-name mirroring; defaults off because it carries a contact name. */
+    fun setMirrorCallerName(enabled: Boolean) {
+        controller.setMirrorCallerName(enabled)
+    }
+
+    /** Opt-in missed-call icon; the frame carries no personal fields. */
+    fun setMirrorMissedCalls(enabled: Boolean) {
+        controller.setMirrorMissedCalls(enabled)
     }
 
     fun clearError() {
