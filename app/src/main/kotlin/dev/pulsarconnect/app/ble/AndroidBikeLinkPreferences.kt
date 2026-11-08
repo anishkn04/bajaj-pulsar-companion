@@ -41,6 +41,8 @@ class AndroidBikeLinkPreferences(context: Context) : BikeLinkPreferences {
         mirroring = preferences.getBoolean(KEY_MIRRORING, true),
         keepInBackground = preferences.getBoolean(KEY_BACKGROUND, true),
         startOnBoot = preferences.getBoolean(KEY_BOOT, true),
+        mirrorCallerName = preferences.getBoolean(KEY_CALLER_NAME, false),
+        mirrorMissedCalls = preferences.getBoolean(KEY_MISSED_CALLS, false),
         armedVin = preferences.getString(KEY_ARMED_VIN, null),
     )
 
@@ -49,6 +51,8 @@ class AndroidBikeLinkPreferences(context: Context) : BikeLinkPreferences {
             .putBoolean(KEY_MIRRORING, next.mirroring)
             .putBoolean(KEY_BACKGROUND, next.keepInBackground)
             .putBoolean(KEY_BOOT, next.startOnBoot)
+            .putBoolean(KEY_CALLER_NAME, next.mirrorCallerName)
+            .putBoolean(KEY_MISSED_CALLS, next.mirrorMissedCalls)
             .putString(KEY_ARMED_VIN, next.armedVin)
             .apply()
         settingsFlow.value = next
@@ -66,6 +70,14 @@ class AndroidBikeLinkPreferences(context: Context) : BikeLinkPreferences {
         apply(settingsFlow.value.copy(startOnBoot = enabled))
     }
 
+    override fun setMirrorCallerName(enabled: Boolean) {
+        apply(settingsFlow.value.copy(mirrorCallerName = enabled))
+    }
+
+    override fun setMirrorMissedCalls(enabled: Boolean) {
+        apply(settingsFlow.value.copy(mirrorMissedCalls = enabled))
+    }
+
     override fun setArmedVin(vin: String?) {
         apply(settingsFlow.value.copy(armedVin = vin))
     }
@@ -76,6 +88,8 @@ class AndroidBikeLinkPreferences(context: Context) : BikeLinkPreferences {
         private const val KEY_MIRRORING = "mirroring"
         private const val KEY_BACKGROUND = "keep_in_background"
         private const val KEY_BOOT = "start_on_boot"
+        private const val KEY_CALLER_NAME = "mirror_caller_name"
+        private const val KEY_MISSED_CALLS = "mirror_missed_calls"
         private const val KEY_ARMED_VIN = "armed_vin"
     }
 }

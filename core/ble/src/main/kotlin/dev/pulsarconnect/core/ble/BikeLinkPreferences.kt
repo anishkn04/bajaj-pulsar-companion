@@ -10,11 +10,16 @@ import kotlinx.coroutines.flow.asStateFlow
  *
  * [armedVin] is a lookup key only: it lets the background service find the selected bike
  * without decrypting the session while the phone is booting.
+ *
+ * Call mirroring is opt-in and off by default because the cluster would receive a contact's
+ * display name. Missed calls carry no personal data but are still opt-in.
  */
 data class BikeLinkSettings(
     val mirroring: Boolean = true,
     val keepInBackground: Boolean = true,
     val startOnBoot: Boolean = true,
+    val mirrorCallerName: Boolean = false,
+    val mirrorMissedCalls: Boolean = false,
     val armedVin: String? = null,
 ) {
     /** Mirroring only survives leaving the app when background mode is also on. */
@@ -22,6 +27,9 @@ data class BikeLinkSettings(
 
     /** Boot auto-start is opt-in and only meaningful when a background link is armed. */
     val resumesAfterBoot: Boolean get() = startOnBoot && runsInBackground && armedVin != null
+
+    /** True while at least one call feature is wanted. */
+    val mirrorsAnyCall: Boolean get() = mirrorCallerName || mirrorMissedCalls
 }
 
 interface BikeLinkPreferences {
@@ -32,6 +40,10 @@ interface BikeLinkPreferences {
     fun setKeepInBackground(enabled: Boolean)
 
     fun setStartOnBoot(enabled: Boolean)
+
+    fun setMirrorCallerName(enabled: Boolean)
+
+    fun setMirrorMissedCalls(enabled: Boolean)
 
     fun setArmedVin(vin: String?)
 }
@@ -53,6 +65,14 @@ class InMemoryBikeLinkPreferences(
 
     override fun setStartOnBoot(enabled: Boolean) {
         mutable.value = mutable.value.copy(startOnBoot = enabled)
+    }
+
+    override fun setMirrorCallerName(enabled: Boolean) {
+        mutable.value = mutable.value.copy(mirrorCallerName = enabled)
+    }
+
+    override fun setMirrorMissedCalls(enabled: Boolean) {
+        mutable.value = mutable.value.copy(mirrorMissedCalls = enabled)
     }
 
     override fun setArmedVin(vin: String?) {

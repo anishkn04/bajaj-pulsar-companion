@@ -304,18 +304,91 @@ class BikeConnectionPhoneStatusTest {
     }
 
     @Test
-    fun `replacement capabilities are checked anew rather than inherited`() = runTest {
+    fun `call status writes the caller fields on the GENERAL endpoint`() = runTest {
         fake.services = supportedServices()
         val connection = connection()
         connect(connection)
-        assertTrue(connection.sendPhoneStatus(status, 1))
-        val old = fake.latestSession
-        fake.services = listOf(BleService(unrelatedUuid, listOf(characteristic())))
 
+        assertTrue(
+            connection.sendPhoneStatus(
+                status,
+                heartbeat = 7,
+                callState = CallState.INCOMING_CALL,
+                callerName = "Asha",
+            ),
+        )
+
+        val write = fake.latestSession.writes.single()
+        assertEquals(generalUuid, write.characteristic)
+        assertArrayEquals(
+            PhoneStatusProtocol.encode(status, 7, CallState.INCOMING_CALL, "Asha"),
+            write.bytes,
+        )
+    }
+
+    @Test
+    fun `missed call writes the fixed frame to the MISSED_CALL endpoint`() = runTest {
+        fake.services = listOf(
+            BleService(
+                serviceUuid,
+                listOf(
+                    characteristic(),
+                    characteristic(PhoneStatusProtocol.MISSED_CALL_UUID),
+                ),
+            ),
+        )
+        val connection = connection()
         connect(connection)
 
-        assertFalse(connection.sendPhoneStatus(status, 2))
-        assertEquals(1, old.writes.size)
+        assertTrue(connection.sendMissedCall())
+
+        val write = fake.latestSession.writes.single()
+        assertEquals(PhoneStatusProtocol.MISSED_CALL_UUID, write.characteristic)
+        assertTrue(write.withResponse)
+        assertArrayEquals(PhoneStatusProtocol.encodeMissedCall(), write.bytes)
+    }
+
+    @Test
+    fun `missed call without the writable endpoint returns false`() = runTest {
+        fake.services = supportedServices()
+        val connection = connection()
+        connect(connection)
+
+        assertFalse(connection.sendMissedCall())
+        assertTrue(fake.latestSession.writes.isEmpty())
+    }
+
+    @Test
+    fun `missed call needs an MTU large enough for its seventy four byte frame`() = runTest {
+        fake.services = listOf(
+            BleService(
+                serviceUuid,
+                listOf(
+                    characteristic(),
+                    characteristic(PhoneStatusProtocol.MISSED_CALL_UUID),
+                ),
+            ),
+        )
+        val connection = connection()
+        connect(connection)
+        fake.latestSession.negotiatedMtu = PhoneStatusProtocol.MISSED_CALL_REQUIRED_MTU - 1
+
+        assertFalse(connection.sendMissedCall())
+        assertTrue(fake.latestSession.writes.isEmpty())
+    }
+
+    @Test
+    fun `disconnected sessions cannot send a missed call`() = runTest {
+        fake.services = listOf(
+            BleService(serviceUuid, listOf(characteristic(PhoneStatusProtocol.MISSED_CALL_UUID))),
+        )
+        val connection = connection()
+        assertFalse(connection.sendMissedCall())
+
+        connect(connection)
+        fake.latestSession.disconnect()
+        runCurrent()
+        assertFalse(connection.sendMissedCall())
         assertTrue(fake.latestSession.writes.isEmpty())
     }
 }

@@ -16,6 +16,8 @@ data class BikeLinkState(
     val settings: BikeLinkSettings = BikeLinkSettings(),
     val mirroringActive: Boolean = false,
     val mirroringError: String? = null,
+    val callerMirroringAvailable: Boolean = false,
+    val missedCallMirroringAvailable: Boolean = false,
 )
 
 /**
@@ -32,11 +34,20 @@ class BikeLinkController(
     val preferences: BikeLinkPreferences,
     statuses: Flow<PhoneStatus>,
     private val scope: CoroutineScope,
+    callEvents: Flow<CallEvent> = kotlinx.coroutines.flow.emptyFlow(),
 ) {
     private val sender = PhoneStatusSender(
         connection = connection,
         statuses = statuses,
         scope = scope,
+        callEvents = callEvents,
+        callOptions = {
+            val settings = preferences.settings.value
+            CallMirrorOptions(
+                callerName = settings.mirrorCallerName,
+                missedCalls = settings.mirrorMissedCalls,
+            )
+        },
         onStopped = ::onMirroringStopped,
         onSent = ::onMirroringSent,
     )
@@ -154,6 +165,16 @@ class BikeLinkController(
         preferences.setStartOnBoot(enabled)
     }
 
+    /** Opt-in caller-name mirroring. Turning it off stops any caller text on the next frame. */
+    fun setMirrorCallerName(enabled: Boolean) {
+        preferences.setMirrorCallerName(enabled)
+    }
+
+    /** Opt-in missed-call icon. The frame carries no name or number. */
+    fun setMirrorMissedCalls(enabled: Boolean) {
+        preferences.setMirrorMissedCalls(enabled)
+    }
+
     fun select(device: DiscoveredDevice) {
         val vin = _state.value.vin ?: return
         val target = BikeTarget(id = device.id, name = device.name, vin = vin)
@@ -232,8 +253,11 @@ class BikeLinkController(
         val settings = preferences.settings.value
         val connected = connection.state.value as? ConnectionState.Connected
 
-        val canMirror = connected != null && settings.mirroring &&
+        val phoneEndpoint = connected != null &&
             PhoneStatusProtocol.isSupportedBy(connected.services)
+        val missedEndpoint = connected != null &&
+            PhoneStatusProtocol.isMissedCallSupportedBy(connected.services)
+        val canMirror = connected != null && settings.mirroring && phoneEndpoint
         if (canMirror) {
             // Starting the sender only means it may try; mirroring is not reported as active
             // until the sender confirms a real GATT write.
@@ -257,6 +281,8 @@ class BikeLinkController(
             it.copy(
                 mirroringActive = sender.running && sender.hasSent && it.mirroringError == null,
                 mirroringError = if (settings.mirroring) it.mirroringError else null,
+                callerMirroringAvailable = phoneEndpoint,
+                missedCallMirroringAvailable = missedEndpoint,
             )
         }
 

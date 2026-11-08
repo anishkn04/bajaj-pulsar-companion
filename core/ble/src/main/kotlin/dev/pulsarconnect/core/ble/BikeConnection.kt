@@ -133,10 +133,17 @@ class BikeConnection(
     }
 
     /**
-     * Sends only to the recovered writable GENERAL endpoint of the current connection.
+     * Sends the GENERAL phone-status frame to the recovered writable endpoint of the current
+     * connection. [callState] and [callerName] are only meaningful while an incoming call is
+     * ringing or active; [CallerName] guarantees a phone number is never written.
      * Unsupported/disconnected sessions return false; write failures and cancellation propagate.
      */
-    suspend fun sendPhoneStatus(status: PhoneStatus, heartbeat: Int): Boolean {
+    suspend fun sendPhoneStatus(
+        status: PhoneStatus,
+        heartbeat: Int,
+        callState: CallState = CallState.NO_CALL,
+        callerName: String? = null,
+    ): Boolean {
         currentCoroutineContext().ensureActive()
         val version = generation
         val connected = _state.value as? ConnectionState.Connected ?: return false
@@ -151,7 +158,7 @@ class BikeConnection(
         if (mtu < PhoneStatusProtocol.REQUIRED_MTU) {
             throw BleException(BleFailure.MtuTooSmall(PhoneStatusProtocol.REQUIRED_MTU, mtu))
         }
-        val bytes = PhoneStatusProtocol.encodeIdle(status, heartbeat)
+        val bytes = PhoneStatusProtocol.encode(status, heartbeat, callState, callerName)
         if (!isCurrent()) return false
         // Never re-read session for the write: a replacement must not receive this payload.
         activeSession.write(
@@ -162,6 +169,35 @@ class BikeConnection(
         )
         currentCoroutineContext().ensureActive()
         // An automatic reconnect can replace the session without changing the run generation.
+        return isCurrent()
+    }
+
+    /**
+     * Sends the fixed missed-call icon to the writable MISS_CALL endpoint.
+     *
+     * Returns false when the peer does not expose the endpoint or the negotiated MTU cannot hold
+     * the 74-byte frame; neither case is a link failure. Write failures and cancellation propagate.
+     */
+    suspend fun sendMissedCall(): Boolean {
+        currentCoroutineContext().ensureActive()
+        val version = generation
+        val connected = _state.value as? ConnectionState.Connected ?: return false
+        val activeSession = session ?: return false
+        fun isCurrent(): Boolean = version == generation && session === activeSession &&
+            _state.value === connected
+        if (!PhoneStatusProtocol.isMissedCallSupportedBy(connected.services)) return false
+        if (!isCurrent()) return false
+        val mtu = activeSession.requestMtu(PhoneStatusProtocol.PREFERRED_MTU)
+        if (mtu < PhoneStatusProtocol.MISSED_CALL_REQUIRED_MTU) return false
+        val bytes = PhoneStatusProtocol.encodeMissedCall()
+        if (!isCurrent()) return false
+        activeSession.write(
+            PhoneStatusProtocol.SERVICE_UUID,
+            PhoneStatusProtocol.MISSED_CALL_UUID,
+            bytes,
+            withResponse = true,
+        )
+        currentCoroutineContext().ensureActive()
         return isCurrent()
     }
 

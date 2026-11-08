@@ -3,8 +3,10 @@ package dev.pulsarconnect.core.ble
 import java.util.UUID
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotSame
 import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class PhoneStatusProtocolTest {
@@ -108,6 +110,127 @@ class PhoneStatusProtocolTest {
         first.fill(0x7f)
         assertIdlePadding(second)
         assertArrayEquals(second, PhoneStatusProtocol.encodeIdle(status, 9))
+    }
+
+    @Test
+    fun `call state is carried in the low bits of byte one`() {
+        val expected = mapOf(
+            CallState.NO_CALL to 0,
+            CallState.INCOMING_CALL to 1,
+            CallState.OUTGOING_CALL to 2,
+            CallState.ACTIVE_CALL to 3,
+            CallState.END_CALL to 4,
+        )
+        for ((state, value) in expected) {
+            val frame = PhoneStatusProtocol.encode(PhoneStatus(47, 2), 9, state)
+            assertEquals(value, frame[1].toInt() and 0x07, state.name)
+            assertEquals(value, state.wireValue)
+        }
+    }
+
+    @Test
+    fun `only an active call flips bytes three and four`() {
+        val active = PhoneStatusProtocol.encode(PhoneStatus(47, 2), 9, CallState.ACTIVE_CALL, "Asha")
+        assertEquals(1, active[3].toInt())
+        assertEquals(0, active[4].toInt())
+
+        for (state in CallState.entries.filter { it != CallState.ACTIVE_CALL }) {
+            val frame = PhoneStatusProtocol.encode(PhoneStatus(47, 2), 9, state, "Asha")
+            assertEquals(0, frame[3].toInt(), state.name)
+            assertEquals(1, frame[4].toInt(), state.name)
+        }
+    }
+
+    @Test
+    fun `caller text is length prefixed at byte twenty and capped at thirty bytes`() {
+        val frame = PhoneStatusProtocol.encode(
+            PhoneStatus(47, 2),
+            9,
+            CallState.INCOMING_CALL,
+            "Asha",
+        )
+        val text = "Asha".toByteArray(Charsets.UTF_8)
+        assertEquals(text.size, frame[20].toInt() and 0xff)
+        assertArrayEquals(text, frame.copyOfRange(21, 21 + text.size))
+        for (offset in 21 + text.size..50) assertEquals(0, frame[offset].toInt(), "padding $offset")
+
+        val longName = "A".repeat(80)
+        val longFrame = PhoneStatusProtocol.encode(
+            PhoneStatus(47, 2), 9, CallState.INCOMING_CALL, longName,
+        )
+        assertEquals(30, longFrame[20].toInt() and 0xff)
+        assertEquals(0, longFrame[51].toInt())
+    }
+
+    @Test
+    fun `caller text is omitted for non-call and outgoing states`() {
+        for (state in listOf(CallState.NO_CALL, CallState.OUTGOING_CALL, CallState.END_CALL)) {
+            val frame = PhoneStatusProtocol.encode(PhoneStatus(47, 2), 9, state, "Asha")
+            assertEquals(0, frame[20].toInt(), state.name)
+            for (offset in 21..50) assertEquals(0, frame[offset].toInt(), "${state.name} $offset")
+        }
+    }
+
+    @Test
+    fun `unknown and phone-like callers never put a dialable value on the wire`() {
+        val fallback = CallerName.UNKNOWN_LABEL.toByteArray(Charsets.UTF_8)
+        for (name in listOf(null, "", "   ", "+1 (555) 010-9999", "5550100", "12345")) {
+            val frame = PhoneStatusProtocol.encode(
+                PhoneStatus(47, 2), 9, CallState.INCOMING_CALL, name,
+            )
+            assertEquals(fallback.size, frame[20].toInt() and 0xff, "name=$name")
+            assertArrayEquals(fallback, frame.copyOfRange(21, 21 + fallback.size), "name=$name")
+        }
+    }
+
+    @Test
+    fun `caller sanitization removes native symbol characters before encoding`() {
+        val frame = PhoneStatusProtocol.encode(
+            PhoneStatus(47, 2), 9, CallState.INCOMING_CALL, "Asha^+-\u260E",
+        )
+        val expected = "Asha".toByteArray(Charsets.UTF_8)
+        assertEquals(expected.size, frame[20].toInt() and 0xff)
+        assertArrayEquals(expected, frame.copyOfRange(21, 21 + expected.size))
+    }
+
+    @Test
+    fun `multibyte caller text is truncated on a code point boundary`() {
+        val bytes = CallerName.wireBytes("é".repeat(20))
+        assertTrue(bytes.size <= CallerName.MAX_BYTES)
+        assertEquals(0, bytes.size % 2, "two-byte code points must not be split")
+        assertEquals("é".repeat(bytes.size / 2), String(bytes, Charsets.UTF_8))
+    }
+
+    @Test
+    fun `missed call frame is the fixed seventy four byte icon trigger`() {
+        val frame = PhoneStatusProtocol.encodeMissedCall()
+        assertEquals(74, frame.size)
+        assertEquals(1, frame[0].toInt())
+        for (offset in 1 until frame.size) assertEquals(0, frame[offset].toInt(), "offset $offset")
+        assertEquals(77, PhoneStatusProtocol.MISSED_CALL_REQUIRED_MTU)
+    }
+
+    @Test
+    fun `missed call capability requires the writable missed call endpoint`() {
+        val service = PhoneStatusProtocol.SERVICE_UUID
+        fun characteristic(uuid: UUID, canWrite: Boolean = true) =
+            BleCharacteristic(uuid, canRead = true, canWrite = canWrite, canNotify = false, canIndicate = false)
+
+        assertTrue(
+            PhoneStatusProtocol.isMissedCallSupportedBy(
+                listOf(BleService(service, listOf(characteristic(PhoneStatusProtocol.MISSED_CALL_UUID)))),
+            ),
+        )
+        assertFalse(
+            PhoneStatusProtocol.isMissedCallSupportedBy(
+                listOf(BleService(service, listOf(characteristic(PhoneStatusProtocol.MISSED_CALL_UUID, canWrite = false)))),
+            ),
+        )
+        assertFalse(
+            PhoneStatusProtocol.isMissedCallSupportedBy(
+                listOf(BleService(service, listOf(characteristic(PhoneStatusProtocol.GENERAL_UUID)))),
+            ),
+        )
     }
 
     private fun assertIdlePadding(frame: ByteArray) {

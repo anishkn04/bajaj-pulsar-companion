@@ -46,6 +46,33 @@ class AndroidBikeLinkPreferencesTest {
     }
 
     @Test
+    fun `call mirroring starts off`() {
+        val settings = AndroidBikeLinkPreferences(context).settings.value
+
+        assertFalse(settings.mirrorCallerName)
+        assertFalse(settings.mirrorMissedCalls)
+        assertFalse(settings.mirrorsAnyCall)
+    }
+
+    @Test
+    fun `call toggles survive a new instance independently`() {
+        val first = AndroidBikeLinkPreferences(context)
+        first.setMirrorCallerName(true)
+
+        val reloaded = AndroidBikeLinkPreferences(context).settings.value
+        assertTrue(reloaded.mirrorCallerName)
+        assertFalse(reloaded.mirrorMissedCalls)
+
+        first.setMirrorCallerName(false)
+        first.setMirrorMissedCalls(true)
+        val second = AndroidBikeLinkPreferences(context).settings.value
+        assertFalse(second.mirrorCallerName)
+        assertTrue(second.mirrorMissedCalls)
+        assertTrue(second.mirrorsAnyCall)
+        assertTrue(second.mirroring)
+    }
+
+    @Test
     fun `each setter updates the snapshot without losing sibling flags`() {
         val preferences = AndroidBikeLinkPreferences(context)
 
