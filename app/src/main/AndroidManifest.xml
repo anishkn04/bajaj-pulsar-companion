@@ -57,6 +57,17 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
+
+        <!-- Opt-in call mirroring. The system binds this only after the rider grants
+             notification access. It publishes just a display label or the missed-call marker. -->
+        <service
+            android:name=".calls.NotificationCallListenerService"
+            android:exported="true"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>

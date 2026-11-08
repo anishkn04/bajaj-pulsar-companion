@@ -4,16 +4,21 @@ import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.telecom.TelecomManager
 import dev.pulsarconnect.app.ble.AndroidBikeDeviceStore
 import dev.pulsarconnect.app.ble.AndroidBikeLinkPreferences
 import dev.pulsarconnect.app.ble.AndroidBleScanner
 import dev.pulsarconnect.app.ble.AndroidBleTransport
+import dev.pulsarconnect.app.ble.AndroidPhoneCallSource
 import dev.pulsarconnect.app.ble.AndroidPhoneStatusSource
 import dev.pulsarconnect.app.ble.BikeLinkRuntime
 import dev.pulsarconnect.app.ble.BikeLinkService
+import dev.pulsarconnect.app.ble.PhoneCallSource
 import dev.pulsarconnect.app.ble.shouldRunBikeLinkService
 import dev.pulsarconnect.app.ble.BleViewModel
 import dev.pulsarconnect.app.ble.PhoneStatusSource
+import dev.pulsarconnect.app.calls.CallNotificationBus
+import dev.pulsarconnect.app.calls.CallNotificationParser
 import dev.pulsarconnect.app.data.AndroidDatabase
 import dev.pulsarconnect.app.notifications.ReminderNotificationManager
 import dev.pulsarconnect.core.ble.BikeConnection
@@ -68,6 +73,12 @@ class AppContainer(context: Context) {
     )
     val phoneStatusSource: PhoneStatusSource = AndroidPhoneStatusSource(context.applicationContext)
 
+    /** Process-local call-notification hand-off; the listener service publishes into it. */
+    val callNotificationBus = CallNotificationBus()
+    val callNotificationParser = CallNotificationParser(dialerPackages(context.applicationContext))
+    val phoneCallSource: PhoneCallSource =
+        AndroidPhoneCallSource(context.applicationContext, callNotificationBus)
+
     /** Persistent bike-link intent (mirroring, background, boot, armed VIN). */
     val bikeLinkPreferences: BikeLinkPreferences = AndroidBikeLinkPreferences(context.applicationContext)
 
@@ -82,6 +93,7 @@ class AppContainer(context: Context) {
             preferences = bikeLinkPreferences,
             statuses = phoneStatusSource.statuses(),
             scope = appScope,
+            callEvents = phoneCallSource.events(),
         )
     }
 
@@ -120,4 +132,25 @@ class AppContainer(context: Context) {
         controller = bikeLinkController,
         runtime = bikeLinkRuntime,
     )
+
+    private companion object {
+        /**
+         * Conservative dialer allowlist. The active default dialer is added at runtime; the
+         * constants cover the stock dialers of the common OEMs without accepting arbitrary apps.
+         */
+        fun dialerPackages(context: Context): Set<String> {
+            val packages = linkedSetOf(
+                "com.google.android.dialer",
+                "com.android.dialer",
+                "com.android.phone",
+                "com.oneplus.dialer",
+                "com.oplus.dialer",
+                "com.samsung.android.dialer",
+            )
+            runCatching {
+                context.getSystemService(TelecomManager::class.java)?.defaultDialerPackage
+            }.getOrNull()?.let { packages += it }
+            return packages
+        }
+    }
 }
