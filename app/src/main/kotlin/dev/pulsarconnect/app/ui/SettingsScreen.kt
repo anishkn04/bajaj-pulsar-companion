@@ -43,7 +43,6 @@ internal fun SettingsScreen(
     ) {
         ScreenHeader(
             title = "Settings",
-            subtitle = "Choose how the bike link behaves when you leave the app or reboot.",
         )
 
         SectionCard(title = "Bike link mirroring") {
@@ -106,12 +105,5 @@ internal fun SettingsScreen(
                 onClick = onOpenBatteryOptimization,
             )
         }
-
-        Text(
-            "Mirroring, background mode and boot resume are global preferences. They are not " +
-                "vehicle-specific and never store credentials, tokens or captures.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }

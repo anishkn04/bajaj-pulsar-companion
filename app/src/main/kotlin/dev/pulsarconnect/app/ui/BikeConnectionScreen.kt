@@ -248,17 +248,12 @@ internal fun BikeConnectionScreen(
                 PulsarCard {
                     PulsarSwitchRow(
                         title = "Battery & signal",
-                        description = "Sends only the verified idle battery/signal frame. Call mirroring is separate and opt-in.",
+                        description = null,
                         checked = bleState.phoneStatusEnabled,
                         onCheckedChange = onPhoneStatusChange,
                         enabled = bleState.phoneStatusAvailable,
                     )
                     when {
-                        !bleState.phoneStatusAvailable -> Text(
-                            "This bike did not expose the writable phone-status endpoint, so nothing will be sent.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
                         bleState.phoneStatusSending -> StatusPill(
                             text = "Sending battery and signal",
                             tone = StatusTone.Active,
@@ -339,11 +334,6 @@ internal fun BikeConnectionScreen(
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold,
                             )
-                            Text(
-                                "Opt-in and off by default. Nothing is read until you enable a switch.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
                         }
                         Icon(
                             Icons.AutoMirrored.Outlined.PhoneMissed,
@@ -355,14 +345,14 @@ internal fun BikeConnectionScreen(
 
                     PulsarSwitchRow(
                         title = "Caller name",
-                        description = "Shows the incoming caller's display name while the phone rings.",
+                        description = null,
                         checked = bleState.callerNameEnabled,
                         onCheckedChange = onCallerNameChange,
                         enabled = callerReady,
                     )
                     PulsarSwitchRow(
                         title = "Missed-call icon",
-                        description = "Sends the fixed cluster icon. No name, number or history is included.",
+                        description = null,
                         checked = bleState.missedCallEnabled,
                         onCheckedChange = onMissedCallChange,
                         enabled = missedReady,
@@ -380,20 +370,7 @@ internal fun BikeConnectionScreen(
                             icon = Icons.Outlined.Notifications,
                         )
                     } else {
-                        if (bleState.phoneStatusAvailable && !bleState.phoneStatusEnabled) {
-                            Text(
-                                "Turn on Battery & signal above to mirror calls.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        if (!bleState.callerNameAvailable) {
-                            Text(
-                                "This bike did not expose the phone-status endpoint, so caller names cannot be shown.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        } else if (!phonePermissionGranted) {
+                        if (bleState.callerNameAvailable && !phonePermissionGranted) {
                             Text(
                                 "Phone-state permission is needed to tell an incoming call from an outgoing one.",
                                 style = MaterialTheme.typography.bodySmall,
@@ -406,18 +383,6 @@ internal fun BikeConnectionScreen(
                                 },
                             )
                         }
-                        if (!bleState.missedCallAvailable) {
-                            Text(
-                                "This bike did not expose the missed-call endpoint, so the icon cannot be sent.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Text(
-                            "Only the display name is sent, and an unknown caller becomes “Incoming call”. Numbers, contacts, messages and call history are never read or stored.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
                     }
                 }
             }
@@ -469,7 +434,7 @@ internal fun BikeConnectionScreen(
                     PulsarDivider()
                     PulsarSwitchRow(
                         title = "Auto-connect",
-                        description = "Reconnects while the app or background service is running.",
+                        description = null,
                         checked = bleState.autoConnect,
                         onCheckedChange = onAutoConnectChange,
                     )
