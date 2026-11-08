@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -34,7 +35,7 @@ class BikeLinkController(
     val preferences: BikeLinkPreferences,
     statuses: Flow<PhoneStatus>,
     private val scope: CoroutineScope,
-    callEvents: Flow<CallEvent> = kotlinx.coroutines.flow.emptyFlow(),
+    callEvents: Flow<CallEvent> = emptyFlow(),
 ) {
     private val sender = PhoneStatusSender(
         connection = connection,
