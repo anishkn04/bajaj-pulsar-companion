@@ -46,17 +46,17 @@ reminders. A mistyped odometer is also currently unfixable. This is the highest-
   data. Merge and replace must both be explicit. Reject unknown/newer versions with a clear
   message. Acceptance: tests cover a valid file, a wrong-version file, and malformed JSON.
 
-- [x] **PC-03 — Edit a completed trip.**
+- [x] **PC-03 — Edit a completed trip.** (`fe225aa`)
   Correct start/end odometer and times without creating a new row. Recompute distance, duration,
   and average speed. Acceptance: `TripRepository` exposes an update method with the same
   validation as `endTrip`; UI edits from the trip card.
   _Shipped v1: odometer correction (distance/average speed recomputed, stored times preserved)._
 
-- [x] **PC-04 — Delete a trip with Undo.**
+- [x] **PC-04 — Delete a trip with Undo.** (`fe225aa`)
   Delete only the selected trip, keep the rest of history intact, and offer an Undo snackbar.
   Acceptance: repository test proves unrelated rows survive; UI restores the row on Undo.
 
-- [x] **PC-05 — Discard an active trip.**
+- [x] **PC-05 — Discard an active trip.** (`fe225aa`)
   Abandon a mistaken in-progress trip without saving a 0 km record. Require confirmation.
   Acceptance: active trip row is removed and history is unchanged.
 
