@@ -60,15 +60,15 @@ reminders. A mistyped odometer is also currently unfixable. This is the highest-
   Abandon a mistaken in-progress trip without saving a 0 km record. Require confirmation.
   Acceptance: active trip row is removed and history is unchanged.
 
-- [x] **PC-06 — Edit and delete a reminder.**
+- [x] **PC-06 — Edit and delete a reminder.** (`09b0096`)
   Change title, description, due odometer, and due date; delete a reminder. Acceptance:
   repository tests for both operations; completed reminders can be edited or deleted too.
 
-- [x] **PC-07 — Snooze a reminder.**
+- [x] **PC-07 — Snooze a reminder.** (`09b0096`)
   Snooze by one day or 500 km. Snooze must not mark the reminder delivered/completed.
   Acceptance: due computation reflects the new threshold; notification suppression still works.
 
-- [x] **PC-08 — Undo "complete" on a reminder.**
+- [x] **PC-08 — Undo "complete" on a reminder.** (`09b0096`)
   Clear `completed`/`completedAtMillis` and re-arm alerts. Acceptance: completing then undoing
   makes the reminder due again when its threshold is met.
 
