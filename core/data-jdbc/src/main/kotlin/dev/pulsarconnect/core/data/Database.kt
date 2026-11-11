@@ -404,8 +404,32 @@ class Database private constructor(
         }
     }
 
-    suspend fun getRemindersForVin(vin: String): List<ServiceReminder> = withContext(Dispatchers.IO) {
+    /** Re-inserts a reminder with its original ID so a restore can preserve references. */
+    suspend fun insertReminderWithId(reminder: ServiceReminder): ServiceReminder = withContext(Dispatchers.IO) {
+        val id = requireNotNull(reminder.id) { "Reminder must have an ID" }
         dataSource.connection.use { conn ->
+            conn.setAutoCommit(false)
+            val stmt = conn.prepareStatement("""
+                INSERT INTO service_reminder (id, vin, title, description, due_odometer_km, due_date_millis,
+                                              completed, completed_at_millis, created_at_millis)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """.trimIndent())
+            stmt.setLong(1, id)
+            stmt.setString(2, reminder.vin)
+            stmt.setString(3, reminder.title)
+            stmt.setString(4, reminder.description)
+            stmt.setObject(5, reminder.dueOdometerKm)
+            stmt.setObject(6, reminder.dueDateMillis)
+            stmt.setInt(7, if (reminder.completed) 1 else 0)
+            stmt.setObject(8, reminder.completedAtMillis)
+            stmt.setLong(9, reminder.createdAtMillis)
+            stmt.executeUpdate()
+            conn.commit()
+            reminder
+        }
+    }
+
+    suspend fun getRemindersForVin(vin: String): List<ServiceReminder> = withContext(Dispatchers.IO) {        dataSource.connection.use { conn ->
             val stmt = conn.prepareStatement("SELECT * FROM service_reminder WHERE vin = ? ORDER BY due_date_millis, due_odometer_km")
             stmt.setString(1, vin)
             stmt.executeQuery().use { rs ->

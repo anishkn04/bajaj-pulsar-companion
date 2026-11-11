@@ -136,6 +136,15 @@ class SqliteReminderRepository(private val db: Database) : ReminderRepository {
         val stored = requireNotNull(db.getReminder(id)) { "Reminder must exist before it can be reopened" }
         return db.updateReminder(stored.copy(completed = false, completedAtMillis = null))
     }
+
+    override suspend fun restoreReminder(reminder: ServiceReminder): ServiceReminder {
+        val id = requireNotNull(reminder.id) { "Reminder must have an ID" }
+        require(db.getReminder(id) == null) { "Reminder ID is already in use" }
+        requireNotNull(db.getBike(reminder.vin)) { "Bike must exist before a reminder can be restored" }
+        return db.insertReminderWithId(reminder)
+    }
+
+    override suspend fun getReminder(id: Long): ServiceReminder? = db.getReminder(id)
 }
 
 class SqliteBikeRepository(private val db: Database) : BikeRepository {

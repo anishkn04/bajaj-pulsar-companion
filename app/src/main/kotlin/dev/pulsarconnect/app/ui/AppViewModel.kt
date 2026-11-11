@@ -7,7 +7,10 @@ import dev.pulsarconnect.app.AppContainer
 import dev.pulsarconnect.app.notifications.NoOpReminderNotifications
 import dev.pulsarconnect.app.notifications.ReminderNotificationActions
 import dev.pulsarconnect.core.data.BikeRepository
+import dev.pulsarconnect.core.data.LocalBackupCodec
+import dev.pulsarconnect.core.data.LocalBackupService
 import dev.pulsarconnect.core.data.ReminderRepository
+import dev.pulsarconnect.core.data.RestoreMode
 import dev.pulsarconnect.core.data.TripRepository
 import dev.pulsarconnect.core.data.requireValidReminder
 import dev.pulsarconnect.core.data.snoozed
@@ -45,6 +48,7 @@ class AppViewModel(
     private val zone: ZoneId = ZoneId.systemDefault(),
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val notificationActions: ReminderNotificationActions = NoOpReminderNotifications,
+    private val backupService: LocalBackupService = LocalBackupService(trips, reminders, bikes),
     private val fetchVehicles: suspend () -> List<Bike> = {
         sessionManager.withSession { stored ->
             api.vehicles(requireNotNull(stored.session.userToken) { "Missing vehicle token" })
@@ -283,6 +287,58 @@ class AppViewModel(
         }
     }
 
+    /**
+     * Writes a versioned JSON export through [write], which the settings screen backs with the
+     * Storage Access Framework. No credentials, tokens, or Bluetooth addresses are included.
+     */
+    fun exportBackup(redactVin: Boolean, write: suspend (String) -> Unit) = localAction { current ->
+        val backup = backupService.export(current.vin, redactVin, clock())
+        try {
+            write(LocalBackupCodec.encode(backup))
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            throw IllegalArgumentException(
+                "Could not write the export file. Choose another location and try again.",
+                error,
+            )
+        }
+        val message = "Exported ${backup.trips.size} trips, ${backup.telemetry.size} ride samples, " +
+            "and ${backup.reminders.size} reminders" +
+            if (redactVin) " with the VIN redacted." else "."
+        updateSignedIn(current.vin, generation) { it.copy(notice = message) }
+    }
+
+    /** Validates and restores a rider-picked backup. Merge and replace are always explicit. */
+    fun restoreBackup(encoded: String, mode: RestoreMode) = localAction { current ->
+        val backup = LocalBackupCodec.decode(encoded)
+        val summary = backupService.restore(backup, current.vin, mode)
+        for (id in summary.restoredReminderIds) {
+            notificationAction("Records restored, but a reminder alert could not be re-armed. Reopen reminder settings to try again.") {
+                notificationActions.onReminderRearmed(id)
+            }
+        }
+        val prefix = if (mode == RestoreMode.REPLACE) "Replaced local records with" else "Merged"
+        val message = if (summary.trips + summary.telemetryPoints + summary.reminders == 0) {
+            "No new records restored. Existing records were kept."
+        } else {
+            "$prefix ${summary.trips} trips, ${summary.telemetryPoints} ride samples, " +
+                "and ${summary.reminders} reminders."
+        }
+        updateSignedIn(current.vin, generation) { it.copy(notice = message) }
+    }
+
+    /** Surfaces a settings-screen file error through the normal snackbar path. */
+    fun reportError(message: String) {
+        val current = _state.value as? UiState.SignedIn ?: return
+        _state.value = current.copy(error = message)
+    }
+
+    fun clearNotice() {
+        val current = _state.value as? UiState.SignedIn ?: return
+        if (current.notice != null) _state.value = current.copy(notice = null)
+    }
+
     private fun localAction(action: suspend (UiState.SignedIn) -> Unit) {
         val current = _state.value as? UiState.SignedIn ?: return
         if (current.busy || current.localLoading || current.localLoadFailed) return
@@ -479,5 +535,7 @@ sealed interface UiState {
         val lastOdometer: Double? = null,
         /** Snapshot kept for the Undo snackbar after a delete. Never persisted. */
         val lastDeletedTrip: Trip? = null,
+        /** One-shot success message for backups; shown as a snackbar. */
+        val notice: String? = null,
     ) : UiState
 }

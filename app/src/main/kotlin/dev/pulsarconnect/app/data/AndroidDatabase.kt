@@ -196,6 +196,18 @@ class AndroidDatabase(
                 reopened
             }
         }
+
+        override suspend fun restoreReminder(reminder: ServiceReminder): ServiceReminder = access { db ->
+            db.transaction {
+                val id = requireNotNull(reminder.id) { "Reminder must have an ID" }
+                requireBike(reminder.vin)
+                require(findReminder(id) == null) { "Reminder ID is already in use" }
+                insertOrThrow("service_reminder", null, reminder.values().apply { put("id", id) })
+                reminder
+            }
+        }
+
+        override suspend fun getReminder(id: Long): ServiceReminder? = access { db -> db.findReminder(id) }
     }
 
     val bikes: BikeRepository = object : BikeRepository {

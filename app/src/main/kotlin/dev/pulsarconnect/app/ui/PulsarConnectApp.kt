@@ -158,6 +158,16 @@ private fun SignedInScreen(
         else viewModel.dismissDeletedTrip()
     }
 
+    LaunchedEffect(state.notice) {
+        val notice = state.notice ?: return@LaunchedEffect
+        snackbarHostState.showSnackbar(
+            message = notice,
+            actionLabel = "Dismiss",
+            duration = SnackbarDuration.Long,
+        )
+        viewModel.clearNotice()
+    }
+
     BackHandler(enabled = navDestination != NavDestination.HOME) {
         navDestination = NavDestination.HOME
     }
@@ -222,10 +232,14 @@ private fun SignedInScreen(
                 )
                 NavDestination.SETTINGS -> SettingsScreen(
                     bleState = bleState,
+                    backupBusy = state.busy,
                     onMirroringChange = bleViewModel::setMirroring,
                     onBackgroundChange = bleViewModel::setKeepInBackground,
                     onBootChange = bleViewModel::setStartOnBoot,
                     onStopMirroring = { bleViewModel.disconnect(); navDestination = NavDestination.HOME },
+                    onExportBackup = viewModel::exportBackup,
+                    onRestoreBackup = viewModel::restoreBackup,
+                    onReportError = viewModel::reportError,
                     onOpenBatteryOptimization = {
                         val intent = Intent().apply {
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {

@@ -4,6 +4,8 @@ import dev.pulsarconnect.app.notifications.ReminderNotificationActions
 import dev.pulsarconnect.core.data.InMemoryBikeRepository
 import dev.pulsarconnect.core.data.InMemoryReminderRepository
 import dev.pulsarconnect.core.data.InMemoryTripRepository
+import dev.pulsarconnect.core.data.REDACTED_VIN
+import dev.pulsarconnect.core.data.RestoreMode
 import dev.pulsarconnect.core.data.TripRepository
 import dev.pulsarconnect.core.model.BikeProfile
 import dev.pulsarconnect.core.model.Credentials
@@ -520,5 +522,68 @@ class AppViewModelTest {
         advanceUntilIdle()
         assertEquals(active, signedIn(vm).activeTrip)
         assertEquals(active, trips.getActiveTrip(vin))
+    }
+
+    @Test fun `redacted export hides the VIN and restore replaces local records`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+        vm.startTrip("100")
+        advanceUntilIdle()
+        now += 3_600_000
+        vm.endTrip("150")
+        advanceUntilIdle()
+        vm.addReminder("Oil", "1500", "")
+        advanceUntilIdle()
+        val tripId = signedIn(vm).trips.single().id!!
+        val reminderId = signedIn(vm).reminders.single().id!!
+
+        var exported = ""
+        vm.exportBackup(redactVin = true) { exported = it }
+        advanceUntilIdle()
+        assertTrue(exported.contains(REDACTED_VIN))
+        assertFalse(exported.contains(vin))
+        assertNotNull(signedIn(vm).notice)
+        vm.clearNotice()
+        assertNull(signedIn(vm).notice)
+
+        trips.deleteTrip(tripId)
+        reminders.deleteReminder(reminderId)
+        notifications.events.clear()
+
+        vm.restoreBackup(exported, RestoreMode.REPLACE)
+        advanceUntilIdle()
+        assertEquals(tripId, signedIn(vm).trips.single().id)
+        assertEquals(reminderId, signedIn(vm).reminders.single().id)
+        assertTrue(notifications.events.contains("rearmed:$reminderId"))
+        assertNotNull(signedIn(vm).notice)
+        assertFalse(signedIn(vm).busy)
+    }
+
+    @Test fun `malformed restore reports an error and leaves records unchanged`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+        vm.addReminder("Oil", "1500", "")
+        advanceUntilIdle()
+        val before = signedIn(vm).reminders
+
+        vm.restoreBackup("{ not a backup", RestoreMode.REPLACE)
+        advanceUntilIdle()
+
+        assertNotNull(signedIn(vm).error)
+        assertEquals(before, signedIn(vm).reminders)
+        assertEquals(before, reminders.getReminders(vin))
+        assertFalse(signedIn(vm).busy)
+    }
+
+    @Test fun `a failed export write reports a clear error and saves nothing`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.exportBackup(redactVin = false) { throw IOException("disk full") }
+        advanceUntilIdle()
+
+        assertTrue(signedIn(vm).error!!.contains("Could not write the export file"))
+        assertNull(signedIn(vm).notice)
+        assertFalse(signedIn(vm).busy)
     }
 }

@@ -53,6 +53,15 @@ interface ReminderRepository {
 
     /** Clears completion so an accidentally completed reminder becomes due again. */
     suspend fun reopenReminder(id: Long): ServiceReminder
+
+    /** Finds a reminder by ID regardless of VIN, used to detect restore conflicts. */
+    suspend fun getReminder(id: Long): ServiceReminder?
+
+    /**
+     * Re-inserts a reminder with its original ID so deletes and backups can be restored. Throws
+     * if the ID is already in use or the bike is missing.
+     */
+    suspend fun restoreReminder(reminder: ServiceReminder): ServiceReminder
 }
 
 interface BikeRepository {
@@ -209,6 +218,16 @@ class InMemoryReminderRepository : ReminderRepository {
         val reopened = stored.copy(completed = false, completedAtMillis = null)
         reminders[id] = reopened
         reopened
+    }
+
+    override suspend fun getReminder(id: Long): ServiceReminder? = mutex.withLock { reminders[id] }
+
+    override suspend fun restoreReminder(reminder: ServiceReminder): ServiceReminder = mutex.withLock {
+        val id = requireNotNull(reminder.id) { "Reminder must have an ID" }
+        require(!reminders.containsKey(id)) { "Reminder ID is already in use" }
+        reminders[id] = reminder
+        nextId = maxOf(nextId, id + 1)
+        reminder
     }
 }
 

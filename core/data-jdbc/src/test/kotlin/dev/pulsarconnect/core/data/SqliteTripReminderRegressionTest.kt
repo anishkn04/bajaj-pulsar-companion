@@ -325,4 +325,19 @@ class SqliteTripReminderRegressionTest {
             runBlocking { reminders.reopenReminder(first.id!!) }
         }
     }
+
+    @Test
+    fun `restoring a reminder keeps its original id and rejects id reuse`() = runTest {
+        val saved = reminders.addReminder(reminder(10_000, 100.0))
+        reminders.deleteReminder(saved.id!!)
+        assertNull(reminders.getReminder(saved.id!!))
+
+        assertEquals(saved, reminders.restoreReminder(saved))
+        assertEquals(saved, reminders.getReminder(saved.id!!))
+        assertEquals(listOf(saved), reminders.getReminders("VIN"))
+
+        assertThrows(IllegalArgumentException::class.java) {
+            runBlocking { reminders.restoreReminder(saved) }
+        }
+    }
 }

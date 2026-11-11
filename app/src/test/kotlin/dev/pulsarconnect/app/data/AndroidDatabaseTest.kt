@@ -282,7 +282,22 @@ class AndroidDatabaseTest {
         rejects { db.reminders.reopenReminder(first.id!!) }
     }
 
-    @Test fun bikeUpsertPreservesChildrenAndNullableProfileFields() = runBlocking {        val trip = db.trips.startTrip(bike.vin, 0.0, null, null)
+    @Test fun restoringAReminderKeepsItsOriginalIdAndRejectsDuplicates() = runBlocking {
+        val saved = db.reminders.addReminder(reminder(odometer = 100.0))
+        db.reminders.deleteReminder(saved.id!!)
+        assertNull(db.reminders.getReminder(saved.id!!))
+
+        assertEquals(saved, db.reminders.restoreReminder(saved))
+        assertEquals(saved, db.reminders.getReminder(saved.id!!))
+        assertEquals(listOf(saved), db.reminders.getReminders(bike.vin))
+
+        reopen()
+        assertEquals(saved, db.reminders.getReminder(saved.id!!))
+        rejects { db.reminders.restoreReminder(saved) }
+    }
+
+    @Test fun bikeUpsertPreservesChildrenAndNullableProfileFields() = runBlocking {
+        val trip = db.trips.startTrip(bike.vin, 0.0, null, null)
         db.trips.addTelemetry(trip.id!!, point())
         val savedReminder = db.reminders.addReminder(reminder().copy(description = null))
         val updated = BikeProfile(bike.vin, null, null, null, null, null)
