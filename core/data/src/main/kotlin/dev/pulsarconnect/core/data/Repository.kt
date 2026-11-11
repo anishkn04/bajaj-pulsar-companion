@@ -22,6 +22,21 @@ interface TripRepository {
     suspend fun getTrips(vin: String, limit: Int, offset: Int): List<Trip>
     suspend fun addTelemetry(tripId: Long, point: TelemetryPoint)
     suspend fun getTelemetry(tripId: Long): List<TelemetryPoint>
+
+    /**
+     * Corrects the odometer readings of a completed trip in place, recomputing distance and
+     * average speed. Keeps the stored VIN and times.
+     */
+    suspend fun updateTripOdometer(tripId: Long, startOdometerKm: Double, endOdometerKm: Double): Trip
+
+    /** Deletes a trip and its stored telemetry. Throws if the trip does not exist. */
+    suspend fun deleteTrip(tripId: Long)
+
+    /**
+     * Re-inserts a deleted trip with its original ID so a delete can be undone. Stored telemetry
+     * is not restored. Throws if the ID is already in use or the bike is missing.
+     */
+    suspend fun restoreTrip(trip: Trip): Trip
 }
 
 interface ReminderRepository {
@@ -112,6 +127,34 @@ class InMemoryTripRepository(
     }
 
     override suspend fun getTelemetry(tripId: Long): List<TelemetryPoint> = telemetry[tripId]?.toList() ?: emptyList()
+
+    override suspend fun updateTripOdometer(
+        tripId: Long,
+        startOdometerKm: Double,
+        endOdometerKm: Double,
+    ): Trip = mutex.withLock {
+        val stored = requireNotNull(trips[tripId]) { "Trip must exist before it can be edited" }
+        val updated = stored.correctedOdometer(startOdometerKm, endOdometerKm)
+        trips[tripId] = updated
+        updated
+    }
+
+    override suspend fun deleteTrip(tripId: Long): Unit = mutex.withLock {
+        requireNotNull(trips.remove(tripId)) { "Trip must exist before it can be deleted" }
+        telemetry.remove(tripId)
+        Unit
+    }
+
+    override suspend fun restoreTrip(trip: Trip): Trip = mutex.withLock {
+        val id = requireNotNull(trip.id) { "Trip must have an ID" }
+        require(!trips.containsKey(id)) { "Trip ID is already in use" }
+        requireValidOdometer(trip.startOdometer)
+        trip.endOdometer?.let { end -> require(end >= trip.startOdometer) { "End odometer must not precede start odometer" } }
+        trips[id] = trip
+        telemetry.getOrPut(id) { mutableListOf() }
+        nextId = maxOf(nextId, id + 1)
+        trip
+    }
 }
 
 class InMemoryReminderRepository : ReminderRepository {

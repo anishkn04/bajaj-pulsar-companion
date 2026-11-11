@@ -66,6 +66,34 @@ class SqliteTripRepository(
     }
 
     override suspend fun getTelemetry(tripId: Long): List<TelemetryPoint> = db.getTelemetryForTrip(tripId)
+
+    override suspend fun updateTripOdometer(
+        tripId: Long,
+        startOdometerKm: Double,
+        endOdometerKm: Double,
+    ): Trip {
+        val stored = requireNotNull(db.getTrip(tripId)) { "Trip must exist before it can be edited" }
+        val updated = stored.correctedOdometer(startOdometerKm, endOdometerKm)
+        db.updateTrip(updated)
+        return updated
+    }
+
+    override suspend fun deleteTrip(tripId: Long) {
+        requireNotNull(db.getTrip(tripId)) { "Trip must exist before it can be deleted" }
+        db.deleteTrip(tripId)
+    }
+
+    override suspend fun restoreTrip(trip: Trip): Trip {
+        val id = requireNotNull(trip.id) { "Trip must have an ID" }
+        requireValidOdometer(trip.startOdometer)
+        trip.endOdometer?.let { end ->
+            require(end >= trip.startOdometer) { "End odometer must not precede start odometer" }
+        }
+        require(db.getTrip(id) == null) { "Trip ID is already in use" }
+        requireNotNull(db.getBike(trip.vin)) { "Bike must exist before a trip can be restored" }
+        db.restoreTrip(trip)
+        return trip
+    }
 }
 
 class SqliteReminderRepository(private val db: Database) : ReminderRepository {

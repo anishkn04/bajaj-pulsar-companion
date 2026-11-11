@@ -297,4 +297,56 @@ class AndroidDatabaseTest {
         db.trips.startTrip(bike.vin, 0.0, null, null)
         assertTrue(clockCalled)
     }
+
+    @Test fun editingACompletedTripPersistsAndRejectsAnActiveTrip() = runBlocking {
+        val trip = db.trips.startTrip(bike.vin, 100.0, null, null)
+        now += 3_600_000
+        val ended = db.trips.endTrip(trip, 150.0, null, null)
+
+        val updated = db.trips.updateTripOdometer(trip.id!!, 90.0, 140.0)
+        assertEquals(50.0, updated.distanceKm!!, 0.0)
+        assertEquals(50.0, updated.avgSpeedKmph!!, 0.0)
+        assertEquals(ended.startTime, updated.startTime)
+        assertEquals(ended.endTime, updated.endTime)
+
+        reopen()
+        assertEquals(updated, db.trips.getTrip(trip.id!!))
+
+        val active = db.trips.startTrip(other.vin, 0.0, null, null)
+        rejects { db.trips.updateTripOdometer(active.id!!, 0.0, 5.0) }
+        rejects { db.trips.updateTripOdometer(trip.id!!, 200.0, 100.0) }
+        assertEquals(updated, db.trips.getTrip(trip.id!!))
+    }
+
+    @Test fun deletingATripRemovesItsTelemetryAndUndoRestoresTheTrip() = runBlocking {
+        val trip = db.trips.startTrip(bike.vin, 100.0, null, null)
+        now += 3_600_000
+        val ended = db.trips.endTrip(trip, 110.0, null, null)
+        db.trips.addTelemetry(trip.id!!, point(5))
+        val otherTrip = db.trips.startTrip(other.vin, 0.0, null, null)
+
+        db.trips.deleteTrip(trip.id!!)
+
+        assertNull(db.trips.getTrip(trip.id!!))
+        assertTrue(db.trips.getTelemetry(trip.id!!).isEmpty())
+        assertEquals(otherTrip, db.trips.getTrip(otherTrip.id!!))
+
+        val restored = db.trips.restoreTrip(ended)
+        assertEquals(ended, restored)
+        assertEquals(ended, db.trips.getTrip(trip.id!!))
+        assertTrue(db.trips.getTelemetry(trip.id!!).isEmpty())
+        rejects { db.trips.restoreTrip(ended) }
+        rejects { db.trips.deleteTrip(9999) }
+    }
+
+    @Test fun discardingAnActiveTripFreesTheActiveSlot() = runBlocking {
+        val active = db.trips.startTrip(bike.vin, 100.0, null, null)
+        rejects { db.trips.startTrip(bike.vin, 101.0, null, null) }
+
+        db.trips.deleteTrip(active.id!!)
+
+        assertNull(db.trips.getActiveTrip(bike.vin))
+        val replacement = db.trips.startTrip(bike.vin, 101.0, null, null)
+        assertEquals(replacement, db.trips.getActiveTrip(bike.vin))
+    }
 }

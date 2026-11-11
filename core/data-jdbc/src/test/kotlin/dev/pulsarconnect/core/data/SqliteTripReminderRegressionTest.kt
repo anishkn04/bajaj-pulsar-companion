@@ -156,6 +156,83 @@ class SqliteTripReminderRegressionTest {
         assertEquals(0L, ended.durationSeconds)
     }
 
+    @Test
+    fun `editing a completed trip recomputes distance and keeps stored times`() = runTest {
+        val trip = trips.startTrip("VIN", 100.0, null, null)
+        now += 3_600_000
+        val ended = trips.endTrip(trip, 150.0, null, null)
+
+        val updated = trips.updateTripOdometer(ended.id!!, 90.0, 140.0)
+
+        assertEquals(90.0, updated.startOdometer)
+        assertEquals(140.0, updated.endOdometer)
+        assertEquals(50.0, updated.distanceKm)
+        assertEquals(50.0, updated.avgSpeedKmph)
+        assertEquals(ended.startTime, updated.startTime)
+        assertEquals(ended.endTime, updated.endTime)
+        assertEquals("VIN", updated.vin)
+        assertEquals(updated, trips.getTrip(ended.id!!))
+    }
+
+    @Test
+    fun `editing rejects active trips missing trips and invalid readings`() = runTest {
+        val active = trips.startTrip("VIN", 100.0, null, null)
+        for ((start, end) in listOf(100.0 to 120.0, -1.0 to 150.0)) {
+            assertThrows(IllegalArgumentException::class.java) {
+                runBlocking { trips.updateTripOdometer(active.id!!, start, end) }
+            }
+        }
+        assertEquals(active, trips.getTrip(active.id!!))
+
+        now += 1_000
+        val ended = trips.endTrip(active, 150.0, null, null)
+        for ((start, end) in listOf(
+            -1.0 to 150.0,
+            100.0 to -1.0,
+            Double.NaN to 150.0,
+            100.0 to Double.POSITIVE_INFINITY,
+            200.0 to 150.0,
+        )) {
+            assertThrows(IllegalArgumentException::class.java) {
+                runBlocking { trips.updateTripOdometer(ended.id!!, start, end) }
+            }
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            runBlocking { trips.updateTripOdometer(Long.MAX_VALUE, 0.0, 1.0) }
+        }
+        assertEquals(ended, trips.getTrip(ended.id!!))
+    }
+
+    @Test
+    fun `deleting removes the trip and telemetry and undo restores the original id`() = runTest {
+        val trip = trips.startTrip("VIN", 100.0, null, null)
+        now += 3_600_000
+        val ended = trips.endTrip(trip, 150.0, null, null)
+        trips.addTelemetry(ended.id!!, point(ended.id!!))
+        val other = trips.startTrip("OTHER", 0.0, null, null)
+
+        trips.deleteTrip(ended.id!!)
+
+        assertNull(trips.getTrip(ended.id!!))
+        assertTrue(trips.getTelemetry(ended.id!!).isEmpty())
+        assertEquals(other, trips.getTrip(other.id!!))
+
+        assertEquals(ended, trips.restoreTrip(ended))
+        assertEquals(ended, trips.getTrip(ended.id!!))
+        assertTrue(trips.getTelemetry(ended.id!!).isEmpty())
+        assertThrows(IllegalArgumentException::class.java) {
+            runBlocking { trips.restoreTrip(ended) }
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            runBlocking { trips.deleteTrip(Long.MAX_VALUE) }
+        }
+    }
+
+    private fun point(tripId: Long) = dev.pulsarconnect.core.model.TelemetryPoint(
+        tripId = tripId, timestamp = 0, speedKmph = 40.0, rpm = 2_000,
+        fuelLevelPercent = 50, engineTempC = 80, lat = null, lon = null, synced = false,
+    )
+
     private fun reminder(date: Long?, odometer: Double?, completed: Boolean = false) = ServiceReminder(
         vin = "VIN", title = "Service", description = null,
         dueOdometerKm = odometer, dueDateMillis = date,

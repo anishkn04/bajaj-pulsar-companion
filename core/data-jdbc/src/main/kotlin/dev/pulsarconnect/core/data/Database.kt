@@ -204,25 +204,71 @@ class Database private constructor(
 
     internal suspend fun finishTrip(trip: Trip) = updateTrip(trip, requireActive = true)
 
+    suspend fun deleteTrip(id: Long) = withContext(Dispatchers.IO) {
+        dataSource.connection.use { conn ->
+            conn.setAutoCommit(false)
+            conn.prepareStatement("DELETE FROM telemetry_point WHERE trip_id = ?").use { stmt ->
+                stmt.setLong(1, id)
+                stmt.executeUpdate()
+            }
+            conn.prepareStatement("DELETE FROM trip WHERE id = ?").use { stmt ->
+                stmt.setLong(1, id)
+                stmt.executeUpdate()
+            }
+            conn.commit()
+        }
+    }
+
+    /** Re-inserts a trip with its original ID so a delete can be undone. */
+    suspend fun restoreTrip(trip: Trip) = withContext(Dispatchers.IO) {
+        val id = requireNotNull(trip.id) { "Trip must have an ID" }
+        dataSource.connection.use { conn ->
+            conn.setAutoCommit(false)
+            val stmt = conn.prepareStatement("""
+                INSERT INTO trip (id, vin, start_time, end_time, start_odometer, end_odometer, distance_km, avg_speed_kmph,
+                                  max_speed_kmph, fuel_used_liters, start_lat, start_lon, end_lat, end_lon, synced)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """.trimIndent())
+            stmt.setLong(1, id)
+            stmt.setString(2, trip.vin)
+            stmt.setLong(3, trip.startTime)
+            stmt.setObject(4, trip.endTime)
+            stmt.setDouble(5, trip.startOdometer)
+            stmt.setObject(6, trip.endOdometer)
+            stmt.setObject(7, trip.distanceKm)
+            stmt.setObject(8, trip.avgSpeedKmph)
+            stmt.setObject(9, trip.maxSpeedKmph)
+            stmt.setObject(10, trip.fuelUsedLiters)
+            stmt.setObject(11, trip.startLat)
+            stmt.setObject(12, trip.startLon)
+            stmt.setObject(13, trip.endLat)
+            stmt.setObject(14, trip.endLon)
+            stmt.setInt(15, if (trip.synced) 1 else 0)
+            stmt.executeUpdate()
+            conn.commit()
+        }
+    }
+
     private suspend fun updateTrip(trip: Trip, requireActive: Boolean) = withContext(Dispatchers.IO) {
         require(trip.id != null) { "Trip must have an ID" }
         dataSource.connection.use { conn ->
             conn.setAutoCommit(false)
             val stmt = conn.prepareStatement("""
-                UPDATE trip SET end_time = ?, end_odometer = ?, distance_km = ?, avg_speed_kmph = ?,
+                UPDATE trip SET start_odometer = ?, end_time = ?, end_odometer = ?, distance_km = ?, avg_speed_kmph = ?,
                                 max_speed_kmph = ?, fuel_used_liters = ?, end_lat = ?, end_lon = ?, synced = ?
                 WHERE id = ? ${if (requireActive) "AND end_time IS NULL" else ""}
             """.trimIndent())
-            stmt.setObject(1, trip.endTime)
-            stmt.setObject(2, trip.endOdometer)
-            stmt.setObject(3, trip.distanceKm)
-            stmt.setObject(4, trip.avgSpeedKmph)
-            stmt.setObject(5, trip.maxSpeedKmph)
-            stmt.setObject(6, trip.fuelUsedLiters)
-            stmt.setObject(7, trip.endLat)
-            stmt.setObject(8, trip.endLon)
-            stmt.setInt(9, if (trip.synced) 1 else 0)
-            stmt.setLong(10, trip.id!!)
+            stmt.setDouble(1, trip.startOdometer)
+            stmt.setObject(2, trip.endTime)
+            stmt.setObject(3, trip.endOdometer)
+            stmt.setObject(4, trip.distanceKm)
+            stmt.setObject(5, trip.avgSpeedKmph)
+            stmt.setObject(6, trip.maxSpeedKmph)
+            stmt.setObject(7, trip.fuelUsedLiters)
+            stmt.setObject(8, trip.endLat)
+            stmt.setObject(9, trip.endLon)
+            stmt.setInt(10, if (trip.synced) 1 else 0)
+            stmt.setLong(11, trip.id!!)
             val updated = stmt.executeUpdate()
             require(!requireActive || updated == 1) { "Trip must exist and be active to end it" }
             conn.commit()

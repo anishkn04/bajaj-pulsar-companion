@@ -340,4 +340,81 @@ class AppViewModelTest {
         assertNotNull(signedIn(vm).error)
         assertFalse(signedIn(vm).busy)
     }
+
+    @Test fun `editing a saved trip corrects its odometer and rejects backwards readings`() = runTest(dispatcher) {
+        val trip = trips.startTrip(vin, 100.0, null, null)
+        now += 3_600_000
+        trips.endTrip(trip, 150.0, null, null)
+        val vm = viewModel()
+        advanceUntilIdle()
+        assertEquals(150.0, signedIn(vm).trips.single().endOdometer!!, 0.0)
+
+        vm.updateTripOdometer(trip.id!!, "90", "140")
+        advanceUntilIdle()
+        val updated = signedIn(vm).trips.single()
+        assertEquals(90.0, updated.startOdometer, 0.0)
+        assertEquals(140.0, updated.endOdometer!!, 0.0)
+        assertEquals(50.0, updated.distanceKm!!, 0.0)
+        assertEquals(50.0, updated.avgSpeedKmph!!, 0.0)
+
+        vm.updateTripOdometer(trip.id!!, "140", "90")
+        advanceUntilIdle()
+        assertNotNull(signedIn(vm).error)
+        assertEquals(140.0, trips.getTrip(trip.id!!)!!.endOdometer!!, 0.0)
+    }
+
+    @Test fun `deleting a saved trip offers undo and restores the original record`() = runTest(dispatcher) {
+        val trip = trips.startTrip(vin, 100.0, null, null)
+        now += 3_600_000
+        val ended = trips.endTrip(trip, 150.0, null, null)
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.deleteTrip(trip.id!!)
+        advanceUntilIdle()
+        assertNull(trips.getTrip(trip.id!!))
+        assertEquals(ended, signedIn(vm).lastDeletedTrip)
+        assertTrue(signedIn(vm).trips.isEmpty())
+
+        vm.undoDeleteTrip()
+        advanceUntilIdle()
+        assertNull(signedIn(vm).lastDeletedTrip)
+        assertEquals(ended, trips.getTrip(trip.id!!))
+        assertEquals(ended, signedIn(vm).trips.single())
+    }
+
+    @Test fun `dismissing undo keeps the trip deleted`() = runTest(dispatcher) {
+        val trip = trips.startTrip(vin, 100.0, null, null)
+        now += 3_600_000
+        trips.endTrip(trip, 150.0, null, null)
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.deleteTrip(trip.id!!)
+        advanceUntilIdle()
+        assertNotNull(signedIn(vm).lastDeletedTrip)
+
+        vm.dismissDeletedTrip()
+        assertNull(signedIn(vm).lastDeletedTrip)
+        assertNull(trips.getTrip(trip.id!!))
+    }
+
+    @Test fun `discarding an active trip frees the active slot and undo brings it back`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+        vm.startTrip("100")
+        advanceUntilIdle()
+        val active = requireNotNull(signedIn(vm).activeTrip)
+
+        vm.deleteTrip(active.id!!)
+        advanceUntilIdle()
+        assertNull(signedIn(vm).activeTrip)
+        assertNull(trips.getActiveTrip(vin))
+        assertEquals(active, signedIn(vm).lastDeletedTrip)
+
+        vm.undoDeleteTrip()
+        advanceUntilIdle()
+        assertEquals(active, signedIn(vm).activeTrip)
+        assertEquals(active, trips.getActiveTrip(vin))
+    }
 }

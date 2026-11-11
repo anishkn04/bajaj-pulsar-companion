@@ -177,6 +177,35 @@ class AppViewModel(
         trips.endTrip(active, parseOdometer(odometerInput), null, null)
     }
 
+    fun updateTripOdometer(tripId: Long, startInput: String, endInput: String) = localAction { current ->
+        require(current.trips.any { it.id == tripId }) { "That trip is no longer available." }
+        val start = parseOdometer(startInput)
+        val end = parseOdometer(endInput)
+        require(end >= start) { "End odometer must not be lower than the start odometer." }
+        trips.updateTripOdometer(tripId, start, end)
+    }
+
+    fun deleteTrip(tripId: Long) = localAction { current ->
+        val trip = (current.trips + listOfNotNull(current.activeTrip)).firstOrNull { it.id == tripId }
+            ?: throw IllegalArgumentException("That trip is no longer available.")
+        trips.deleteTrip(tripId)
+        // Kept only for Undo; the snackbar clears it after dismissal or restore.
+        updateSignedIn(current.vin, generation) { it.copy(lastDeletedTrip = trip) }
+    }
+
+    /** Restores the most recently deleted trip after the rider taps Undo. */
+    fun undoDeleteTrip() = localAction { current ->
+        val trip = requireNotNull(current.lastDeletedTrip) { "There is no deleted trip to restore." }
+        trips.restoreTrip(trip)
+        updateSignedIn(current.vin, generation) { it.copy(lastDeletedTrip = null) }
+    }
+
+    /** Drops the Undo snapshot once the snackbar is dismissed. The deletion stays committed. */
+    fun dismissDeletedTrip() {
+        val current = _state.value as? UiState.SignedIn ?: return
+        if (current.lastDeletedTrip != null) _state.value = current.copy(lastDeletedTrip = null)
+    }
+
     fun addReminder(title: String, odometerInput: String, dateInput: String) = localAction { current ->
         val cleanTitle = title.trim()
         require(cleanTitle.isNotEmpty()) { "Enter a reminder title." }
@@ -383,5 +412,7 @@ sealed interface UiState {
         val error: String? = null,
         val hasMoreTrips: Boolean = false,
         val lastOdometer: Double? = null,
+        /** Snapshot kept for the Undo snackbar after a delete. Never persisted. */
+        val lastDeletedTrip: Trip? = null,
     ) : UiState
 }

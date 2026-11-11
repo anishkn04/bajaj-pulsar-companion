@@ -8,7 +8,9 @@ import android.database.sqlite.SQLiteOpenHelper
 import dev.pulsarconnect.core.data.BikeRepository
 import dev.pulsarconnect.core.data.ReminderRepository
 import dev.pulsarconnect.core.data.TripRepository
+import dev.pulsarconnect.core.data.correctedOdometer
 import dev.pulsarconnect.core.data.isDue
+import dev.pulsarconnect.core.data.requireValidOdometer
 import dev.pulsarconnect.core.model.BikeProfile
 import dev.pulsarconnect.core.model.ServiceReminder
 import dev.pulsarconnect.core.model.TelemetryPoint
@@ -102,6 +104,43 @@ class AndroidDatabase(
 
         override suspend fun getTelemetry(tripId: Long): List<TelemetryPoint> = access { db ->
             db.query("SELECT * FROM telemetry WHERE trip_id = ? ORDER BY timestamp ASC, id ASC", arrayOf(tripId.toString()), Cursor::telemetry)
+        }
+
+        override suspend fun updateTripOdometer(
+            tripId: Long,
+            startOdometerKm: Double,
+            endOdometerKm: Double,
+        ): Trip = access { db ->
+            db.transaction {
+                val stored = requireNotNull(findTrip(tripId)) { "Trip must exist before it can be edited" }
+                val updated = stored.correctedOdometer(startOdometerKm, endOdometerKm)
+                update("trip", updated.values(), "id = ?", arrayOf(tripId.toString()))
+                updated
+            }
+        }
+
+        override suspend fun deleteTrip(tripId: Long): Unit = access { db ->
+            db.transaction {
+                requireNotNull(findTrip(tripId)) { "Trip must exist before it can be deleted" }
+                // Android's schema has no ON DELETE CASCADE, so clear children explicitly.
+                delete("telemetry", "trip_id = ?", arrayOf(tripId.toString()))
+                delete("trip", "id = ?", arrayOf(tripId.toString()))
+                Unit
+            }
+        }
+
+        override suspend fun restoreTrip(trip: Trip): Trip = access { db ->
+            db.transaction {
+                val id = requireNotNull(trip.id) { "Trip must have an ID" }
+                requireValidOdometer(trip.startOdometer)
+                trip.endOdometer?.let { end ->
+                    require(end >= trip.startOdometer) { "End odometer must not precede start odometer" }
+                }
+                requireBike(trip.vin)
+                require(findTrip(id) == null) { "Trip ID is already in use" }
+                insertOrThrow("trip", null, trip.values().apply { put("id", id) })
+                trip
+            }
         }
     }
 

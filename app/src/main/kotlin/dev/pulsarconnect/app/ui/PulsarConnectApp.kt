@@ -146,6 +146,18 @@ private fun SignedInScreen(
         }
     }
 
+    val deletedTrip = state.lastDeletedTrip
+    LaunchedEffect(deletedTrip?.id) {
+        val trip = deletedTrip ?: return@LaunchedEffect
+        val result = snackbarHostState.showSnackbar(
+            message = if (trip.endTime == null) "Trip discarded" else "Trip deleted",
+            actionLabel = "Undo",
+            duration = SnackbarDuration.Long,
+        )
+        if (result == SnackbarResult.ActionPerformed) viewModel.undoDeleteTrip()
+        else viewModel.dismissDeletedTrip()
+    }
+
     BackHandler(enabled = navDestination != NavDestination.HOME) {
         navDestination = NavDestination.HOME
     }
@@ -171,6 +183,8 @@ private fun SignedInScreen(
                     state = state,
                     onStartTrip = viewModel::startTrip,
                     onEndTrip = viewModel::endTrip,
+                    onEditTrip = viewModel::updateTripOdometer,
+                    onDeleteTrip = viewModel::deleteTrip,
                     onLoadMore = viewModel::loadMoreTrips,
                     onClearError = viewModel::clearError,
                     onRetry = viewModel::retryLocalRecords,
