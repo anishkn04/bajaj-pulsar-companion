@@ -9,6 +9,8 @@ import dev.pulsarconnect.app.notifications.ReminderNotificationActions
 import dev.pulsarconnect.core.data.BikeRepository
 import dev.pulsarconnect.core.data.ReminderRepository
 import dev.pulsarconnect.core.data.TripRepository
+import dev.pulsarconnect.core.data.requireValidReminder
+import dev.pulsarconnect.core.data.snoozed
 import dev.pulsarconnect.core.model.BikeProfile
 import dev.pulsarconnect.core.model.Credentials
 import dev.pulsarconnect.core.model.ServiceReminder
@@ -207,22 +209,70 @@ class AppViewModel(
     }
 
     fun addReminder(title: String, odometerInput: String, dateInput: String) = localAction { current ->
-        val cleanTitle = title.trim()
-        require(cleanTitle.isNotEmpty()) { "Enter a reminder title." }
-        val odometer = odometerInput.takeIf(String::isNotBlank)?.let(::parseOdometer)
-        val date = dateInput.trim().takeIf(String::isNotEmpty)?.let {
-            try {
-                LocalDate.parse(it).atStartOfDay(zone).toInstant().toEpochMilli()
-            } catch (_: java.time.DateTimeException) {
-                throw IllegalArgumentException("Enter a valid date as YYYY-MM-DD.")
-            }
-        }
+        val cleanTitle = parseReminderTitle(title)
+        val odometer = parseOptionalOdometer(odometerInput)
+        val date = parseOptionalDate(dateInput)
         require(odometer != null || date != null) { "Enter a due odometer or date (or both)." }
         ensureBike(current.vin)
         reminders.addReminder(ServiceReminder(
             vin = current.vin, title = cleanTitle, description = null,
             dueOdometerKm = odometer, dueDateMillis = date, createdAtMillis = clock(),
         ))
+    }
+
+    fun updateReminder(
+        id: Long,
+        titleInput: String,
+        descriptionInput: String,
+        odometerInput: String,
+        dateInput: String,
+    ) = localAction { current ->
+        val existing = requireNotNull(current.reminders.firstOrNull { it.id == id }) {
+            "That reminder is no longer available."
+        }
+        val updated = existing.copy(
+            title = parseReminderTitle(titleInput),
+            description = descriptionInput.trim().takeIf(String::isNotEmpty),
+            dueOdometerKm = parseOptionalOdometer(odometerInput),
+            dueDateMillis = parseOptionalDate(dateInput),
+        ).also(::requireValidReminder)
+        reminders.updateReminder(updated)
+        if (existing.dueOdometerKm != updated.dueOdometerKm ||
+            existing.dueDateMillis != updated.dueDateMillis
+        ) {
+            notificationAction("Reminder saved, but background alerts could not be updated. Reopen reminder settings to try again.") {
+                notificationActions.onReminderRearmed(id)
+            }
+        }
+    }
+
+    fun deleteReminder(id: Long) = localAction { current ->
+        require(current.reminders.any { it.id == id }) { "That reminder is no longer available." }
+        reminders.deleteReminder(id)
+        notificationAction("Reminder deleted, but its alert could not be cleared. Check Android notification settings.") {
+            notificationActions.onReminderDeleted(id)
+        }
+    }
+
+    /** Moves a pending reminder's date or odometer threshold forward without completing it. */
+    fun snoozeReminder(id: Long, days: Long, kilometres: Double) = localAction { current ->
+        val reminder = requireNotNull(current.reminders.firstOrNull { it.id == id && !it.completed }) {
+            "This reminder is not pending for your bike."
+        }
+        reminders.updateReminder(reminder.snoozed(days, kilometres, zone))
+        notificationAction("Reminder snoozed, but background alerts could not be updated. Reopen reminder settings to try again.") {
+            notificationActions.onReminderRearmed(id)
+        }
+    }
+
+    fun reopenReminder(id: Long) = localAction { current ->
+        require(current.reminders.any { it.id == id && it.completed }) {
+            "This reminder is not completed."
+        }
+        reminders.reopenReminder(id)
+        notificationAction("Reminder reopened, but its alert could not be re-armed. Reopen reminder settings to try again.") {
+            notificationActions.onReminderReopened(id)
+        }
     }
 
     fun completeReminder(id: Long) = localAction { current ->
@@ -381,6 +431,21 @@ class AppViewModel(
         require(value != null && value.isFinite() && value >= 0) { "Enter a finite, nonnegative odometer reading in km." }
         return value
     }
+
+    private fun parseReminderTitle(input: String): String =
+        input.trim().also { require(it.isNotEmpty()) { "Enter a reminder title." } }
+
+    private fun parseOptionalOdometer(input: String): Double? =
+        input.takeIf(String::isNotBlank)?.let(::parseOdometer)
+
+    private fun parseOptionalDate(input: String): Long? =
+        input.trim().takeIf(String::isNotEmpty)?.let {
+            try {
+                LocalDate.parse(it).atStartOfDay(zone).toInstant().toEpochMilli()
+            } catch (_: java.time.DateTimeException) {
+                throw IllegalArgumentException("Enter a valid date as YYYY-MM-DD.")
+            }
+        }
 
     companion object {
         private const val PAGE_SIZE = 20

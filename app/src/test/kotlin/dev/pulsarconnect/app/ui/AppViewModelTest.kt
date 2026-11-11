@@ -71,6 +71,18 @@ class AppViewModelTest {
             events.add("completed:$id")
             if (failScheduling) throw IllegalStateException("scheduler unavailable")
         }
+        override fun onReminderRearmed(id: Long) {
+            events.add("rearmed:$id")
+            if (failScheduling) throw IllegalStateException("scheduler unavailable")
+        }
+        override fun onReminderReopened(id: Long) {
+            events.add("reopened:$id")
+            if (failScheduling) throw IllegalStateException("scheduler unavailable")
+        }
+        override fun onReminderDeleted(id: Long) {
+            events.add("deleted:$id")
+            if (failScheduling) throw IllegalStateException("scheduler unavailable")
+        }
     }
 
     @Before fun setUp() {
@@ -259,6 +271,98 @@ class AppViewModelTest {
         vm.completeReminder(reminder.id!!)
         advanceUntilIdle()
         assertTrue(signedIn(vm).reminders.single().completed)
+    }
+
+    @Test fun `editing a reminder updates rider fields and preserves completion`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+        vm.addReminder("Oil", "1500", "2026-11-05")
+        advanceUntilIdle()
+        val saved = signedIn(vm).reminders.single()
+        vm.completeReminder(saved.id!!)
+        advanceUntilIdle()
+        notifications.events.clear()
+
+        vm.updateReminder(saved.id!!, " Chain ", " Clean and lube ", "2000", "2026-12-01")
+        advanceUntilIdle()
+
+        val updated = signedIn(vm).reminders.single()
+        assertEquals("Chain", updated.title)
+        assertEquals("Clean and lube", updated.description)
+        assertEquals(2_000.0, updated.dueOdometerKm!!, 0.0)
+        assertEquals(Instant.parse("2026-12-01T00:00:00Z").toEpochMilli(), updated.dueDateMillis)
+        assertTrue(updated.completed)
+        assertTrue(notifications.events.contains("rearmed:${saved.id}"))
+        assertTrue(notifications.events.contains("refresh"))
+
+        vm.updateReminder(saved.id!!, " ", "", "", "")
+        advanceUntilIdle()
+        assertNotNull(signedIn(vm).error)
+        assertEquals(updated, signedIn(vm).reminders.single())
+    }
+
+    @Test fun `snoozing shifts due thresholds without completing the reminder`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+        vm.addReminder("Oil", "1500", "2026-11-05")
+        advanceUntilIdle()
+        val saved = signedIn(vm).reminders.single()
+        notifications.events.clear()
+
+        vm.snoozeReminder(saved.id!!, days = 1, kilometres = 500.0)
+        advanceUntilIdle()
+
+        val snoozed = signedIn(vm).reminders.single()
+        assertEquals(2_000.0, snoozed.dueOdometerKm!!, 0.0)
+        assertEquals(Instant.parse("2026-11-06T00:00:00Z").toEpochMilli(), snoozed.dueDateMillis)
+        assertFalse(snoozed.completed)
+        assertTrue(notifications.events.contains("rearmed:${saved.id}"))
+        assertEquals(snoozed, reminders.getReminders(vin).single())
+    }
+
+    @Test fun `deleting a reminder removes only that reminder and clears its alert`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+        vm.addReminder("Oil", "1500", "")
+        advanceUntilIdle()
+        vm.addReminder("Chain", "2500", "")
+        advanceUntilIdle()
+        val oil = signedIn(vm).reminders.first { it.title == "Oil" }
+        notifications.events.clear()
+
+        vm.deleteReminder(oil.id!!)
+        advanceUntilIdle()
+
+        assertEquals(listOf("Chain"), signedIn(vm).reminders.map { it.title })
+        assertTrue(notifications.events.contains("deleted:${oil.id}"))
+        assertTrue(notifications.events.contains("refresh"))
+        vm.deleteReminder(oil.id!!)
+        advanceUntilIdle()
+        assertNotNull(signedIn(vm).error)
+    }
+
+    @Test fun `undoing completion makes a due reminder alertable again`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+        vm.addReminder("Oil", "", "2026-10-01")
+        advanceUntilIdle()
+        val saved = signedIn(vm).reminders.single()
+        assertEquals(listOf(saved), reminders.getDueReminders(vin, 0.0, now))
+
+        vm.completeReminder(saved.id!!)
+        advanceUntilIdle()
+        assertTrue(reminders.getDueReminders(vin, 0.0, now).isEmpty())
+        notifications.events.clear()
+
+        vm.reopenReminder(saved.id!!)
+        advanceUntilIdle()
+
+        val reopened = signedIn(vm).reminders.single()
+        assertFalse(reopened.completed)
+        assertNull(reopened.completedAtMillis)
+        assertEquals(listOf(reopened), reminders.getDueReminders(vin, 0.0, now))
+        assertTrue(notifications.events.contains("reopened:${saved.id}"))
+        assertTrue(notifications.events.contains("refresh"))
     }
 
     @Test fun `refresh never displays another bikes profile and caches exact VIN match`() = runTest(dispatcher) {

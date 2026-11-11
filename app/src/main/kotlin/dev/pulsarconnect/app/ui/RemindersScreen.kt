@@ -1,6 +1,7 @@
 package dev.pulsarconnect.app.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -10,14 +11,23 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -27,12 +37,19 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import dev.pulsarconnect.core.data.isDue
 import dev.pulsarconnect.core.model.ServiceReminder
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.delay
 
 @Composable
 internal fun RemindersScreen(
     state: UiState.SignedIn,
     onAddReminder: (String, String, String) -> Unit,
+    onEditReminder: (Long, String, String, String, String) -> Unit,
+    onDeleteReminder: (Long) -> Unit,
+    onSnoozeReminder: (Long, Long, Double) -> Unit,
+    onReopenReminder: (Long) -> Unit,
     onCompleteReminder: (Long) -> Unit,
     onClearError: () -> Unit,
     onRetry: () -> Unit,
@@ -43,6 +60,8 @@ internal fun RemindersScreen(
     var odometer by rememberSaveable(state.vin) { mutableStateOf("") }
     var date by rememberSaveable(state.vin) { mutableStateOf("") }
     var submittedCount by rememberSaveable(state.vin) { mutableStateOf<Int?>(null) }
+    var editingReminder by remember { mutableStateOf<ServiceReminder?>(null) }
+    var deletingReminder by remember { mutableStateOf<ServiceReminder?>(null) }
     // Preserve input on validation errors; clear only after a new reminder is observed.
     LaunchedEffect(state.reminders.size) {
         submittedCount?.let { count ->
@@ -152,7 +171,17 @@ internal fun RemindersScreen(
             item { EmptyState("No pending reminders. Add your next service above.") }
         }
         items(pending) { reminder ->
-            ReminderRecordCard(reminder, state.lastOdometer, now, enabled, onCompleteReminder)
+            ReminderRecordCard(
+                reminder = reminder,
+                lastOdometer = state.lastOdometer,
+                now = now,
+                enabled = enabled,
+                onComplete = onCompleteReminder,
+                onEdit = { editingReminder = reminder },
+                onDelete = { deletingReminder = reminder },
+                onSnooze = { days, kilometres -> reminder.id?.let { onSnoozeReminder(it, days, kilometres) } },
+                onReopen = null,
+            )
         }
 
         item { SectionHeader("Completed (${completed.size})") }
@@ -160,8 +189,49 @@ internal fun RemindersScreen(
             item { EmptyState("No completed reminders yet.") }
         }
         items(completed) { reminder ->
-            ReminderRecordCard(reminder, state.lastOdometer, now, enabled, onCompleteReminder)
+            ReminderRecordCard(
+                reminder = reminder,
+                lastOdometer = state.lastOdometer,
+                now = now,
+                enabled = enabled,
+                onComplete = onCompleteReminder,
+                onEdit = { editingReminder = reminder },
+                onDelete = { deletingReminder = reminder },
+                onSnooze = { _, _ -> },
+                onReopen = { reminder.id?.let(onReopenReminder) },
+            )
         }
+    }
+
+    editingReminder?.let { reminder ->
+        EditReminderDialog(
+            reminder = reminder,
+            onDismiss = { editingReminder = null },
+            onConfirm = { newTitle, description, newOdometer, newDate ->
+                editingReminder = null
+                reminder.id?.let { onEditReminder(it, newTitle, description, newOdometer, newDate) }
+            },
+        )
+    }
+    deletingReminder?.let { reminder ->
+        AlertDialog(
+            onDismissRequest = { deletingReminder = null },
+            title = { Text("Delete this reminder?") },
+            text = { Text("“${reminder.title}” will be removed permanently.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        deletingReminder = null
+                        reminder.id?.let(onDeleteReminder)
+                    },
+                ) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deletingReminder = null }) { Text("Cancel") }
+            },
+        )
     }
 }
 
@@ -172,7 +242,12 @@ private fun ReminderRecordCard(
     now: Long,
     enabled: Boolean,
     onComplete: (Long) -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+    onSnooze: (Long, Double) -> Unit,
+    onReopen: (() -> Unit)?,
 ) {
+    var menuOpen by remember { mutableStateOf(false) }
     val due = reminder.isDue(lastOdometer ?: Double.NaN, now)
     PulsarCard {
         Row(
@@ -193,6 +268,52 @@ private fun ReminderRecordCard(
                 else -> "Not due" to StatusTone.Neutral
             }
             StatusPill(text = label, tone = tone)
+            Box {
+                IconButton(onClick = { menuOpen = true }, enabled = enabled) {
+                    Icon(Icons.Outlined.MoreVert, contentDescription = "Reminder actions")
+                }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Edit reminder") },
+                        onClick = {
+                            menuOpen = false
+                            onEdit()
+                        },
+                    )
+                    if (!reminder.completed && reminder.dueDateMillis != null) {
+                        DropdownMenuItem(
+                            text = { Text("Snooze 1 day") },
+                            onClick = {
+                                menuOpen = false
+                                onSnooze(1, 0.0)
+                            },
+                        )
+                    }
+                    if (!reminder.completed && reminder.dueOdometerKm != null) {
+                        DropdownMenuItem(
+                            text = { Text("Snooze 500 km") },
+                            onClick = {
+                                menuOpen = false
+                                onSnooze(0, 500.0)
+                            },
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text("Delete reminder") },
+                        onClick = {
+                            menuOpen = false
+                            onDelete()
+                        },
+                    )
+                }
+            }
+        }
+        reminder.description?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
         Text(
             when {
@@ -237,8 +358,101 @@ private fun ReminderRecordCard(
                 enabled = enabled && reminder.id != null,
                 style = PillStyle.Tonal,
             )
+        } else if (onReopen != null) {
+            PillButton(
+                label = "Undo complete",
+                onClick = onReopen,
+                enabled = enabled && reminder.id != null,
+                style = PillStyle.Outlined,
+            )
         }
     }
+}
+
+@Composable
+private fun EditReminderDialog(
+    reminder: ServiceReminder,
+    onDismiss: () -> Unit,
+    onConfirm: (String, String, String, String) -> Unit,
+) {
+    var title by remember(reminder.id) { mutableStateOf(reminder.title) }
+    var description by remember(reminder.id) { mutableStateOf(reminder.description.orEmpty()) }
+    var odometer by remember(reminder.id) {
+        mutableStateOf(reminder.dueOdometerKm?.let(::editableOdometer).orEmpty())
+    }
+    var date by remember(reminder.id) {
+        mutableStateOf(reminder.dueDateMillis?.let(::editableDate).orEmpty())
+    }
+    var validationError by remember(reminder.id) { mutableStateOf<String?>(null) }
+
+    fun submit() {
+        val odometerValue = odometer.trim().takeIf(String::isNotEmpty)?.toDoubleOrNull()
+        validationError = when {
+            title.isBlank() -> "Enter a reminder title."
+            odometer.isNotBlank() && (odometerValue == null || !odometerValue.isFinite() || odometerValue < 0) ->
+                "Enter a finite, nonnegative odometer reading in km."
+            odometer.isBlank() && date.isBlank() -> "Enter a due odometer or date (or both)."
+            else -> null
+        }
+        if (validationError == null) onConfirm(title, description, odometer, date)
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit reminder") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Title") },
+                    singleLine = true,
+                    isError = validationError != null,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text("Description (optional)") },
+                    maxLines = 3,
+                    isError = validationError != null,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = odometer,
+                    onValueChange = { odometer = it },
+                    label = { Text("Due odometer (km, optional)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    isError = validationError != null,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = date,
+                    onValueChange = { date = it },
+                    label = { Text("Due date (optional)") },
+                    placeholder = { Text("yyyy-MM-dd") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+                    singleLine = true,
+                    isError = validationError != null,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                validationError?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = ::submit) { Text("Save") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
 }
 
 @Composable
@@ -251,3 +465,8 @@ internal fun rememberCurrentTimeMillis(): Long {
     }
     return now
 }
+
+private fun editableDate(millis: Long): String =
+    DateTimeFormatter.ISO_LOCAL_DATE.format(
+        Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).toLocalDate(),
+    )

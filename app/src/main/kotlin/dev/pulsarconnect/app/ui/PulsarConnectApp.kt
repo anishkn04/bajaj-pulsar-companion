@@ -192,6 +192,10 @@ private fun SignedInScreen(
                 NavDestination.REMINDERS -> RemindersScreen(
                     state = state,
                     onAddReminder = viewModel::addReminder,
+                    onEditReminder = viewModel::updateReminder,
+                    onDeleteReminder = viewModel::deleteReminder,
+                    onSnoozeReminder = viewModel::snoozeReminder,
+                    onReopenReminder = viewModel::reopenReminder,
                     onCompleteReminder = viewModel::completeReminder,
                     onClearError = viewModel::clearError,
                     onRetry = viewModel::retryLocalRecords,

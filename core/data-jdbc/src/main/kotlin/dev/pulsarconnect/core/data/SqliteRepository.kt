@@ -119,6 +119,23 @@ class SqliteReminderRepository(private val db: Database) : ReminderRepository {
         val all = db.getRemindersForVin(vin)
         return all.filter { it.isDue(currentOdometer, currentTimeMillis) }
     }
+
+    override suspend fun updateReminder(reminder: ServiceReminder): ServiceReminder {
+        requireValidReminder(reminder)
+        val id = requireNotNull(reminder.id) { "Reminder must have an ID" }
+        requireNotNull(db.getReminder(id)) { "Reminder must exist before it can be edited" }
+        return db.updateReminder(reminder)
+    }
+
+    override suspend fun deleteReminder(id: Long) {
+        requireNotNull(db.getReminder(id)) { "Reminder must exist before it can be deleted" }
+        db.deleteReminder(id)
+    }
+
+    override suspend fun reopenReminder(id: Long): ServiceReminder {
+        val stored = requireNotNull(db.getReminder(id)) { "Reminder must exist before it can be reopened" }
+        return db.updateReminder(stored.copy(completed = false, completedAtMillis = null))
+    }
 }
 
 class SqliteBikeRepository(private val db: Database) : BikeRepository {

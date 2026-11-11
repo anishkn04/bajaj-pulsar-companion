@@ -416,17 +416,42 @@ class Database private constructor(
         }
     }
 
-    suspend fun updateReminder(reminder: ServiceReminder) = withContext(Dispatchers.IO) {
-        require(reminder.id != null) { "Reminder must have an ID" }
+    suspend fun getReminder(id: Long): ServiceReminder? = withContext(Dispatchers.IO) {
+        dataSource.connection.use { conn ->
+            val stmt = conn.prepareStatement("SELECT * FROM service_reminder WHERE id = ?")
+            stmt.setLong(1, id)
+            stmt.executeQuery().use { rs -> if (rs.next()) mapReminder(rs) else null }
+        }
+    }
+
+    suspend fun updateReminder(reminder: ServiceReminder): ServiceReminder = withContext(Dispatchers.IO) {
+        val id = requireNotNull(reminder.id) { "Reminder must have an ID" }
         dataSource.connection.use { conn ->
             conn.setAutoCommit(false)
             val stmt = conn.prepareStatement("""
-                UPDATE service_reminder SET completed = ?, completed_at_millis = ? WHERE id = ?
+                UPDATE service_reminder SET title = ?, description = ?, due_odometer_km = ?, due_date_millis = ?,
+                                            completed = ?, completed_at_millis = ?
+                WHERE id = ?
             """.trimIndent())
-            stmt.setInt(1, if (reminder.completed) 1 else 0)
-            stmt.setObject(2, reminder.completedAtMillis)
-            stmt.setLong(3, reminder.id!!)
-            stmt.executeUpdate()
+            stmt.setString(1, reminder.title)
+            stmt.setString(2, reminder.description)
+            stmt.setObject(3, reminder.dueOdometerKm)
+            stmt.setObject(4, reminder.dueDateMillis)
+            stmt.setInt(5, if (reminder.completed) 1 else 0)
+            stmt.setObject(6, reminder.completedAtMillis)
+            stmt.setLong(7, id)
+            require(stmt.executeUpdate() > 0) { "Reminder must exist before it can be edited" }
+            conn.commit()
+            reminder
+        }
+    }
+
+    suspend fun deleteReminder(id: Long) = withContext(Dispatchers.IO) {
+        dataSource.connection.use { conn ->
+            conn.setAutoCommit(false)
+            val stmt = conn.prepareStatement("DELETE FROM service_reminder WHERE id = ?")
+            stmt.setLong(1, id)
+            require(stmt.executeUpdate() > 0) { "Reminder must exist before it can be deleted" }
             conn.commit()
         }
     }

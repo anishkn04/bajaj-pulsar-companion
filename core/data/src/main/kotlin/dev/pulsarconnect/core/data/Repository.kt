@@ -44,6 +44,15 @@ interface ReminderRepository {
     suspend fun getReminders(vin: String): List<ServiceReminder>
     suspend fun completeReminder(id: Long, atMillis: Long)
     suspend fun getDueReminders(vin: String, currentOdometer: Double, currentTimeMillis: Long): List<ServiceReminder>
+
+    /** Replaces the rider-editable fields of an existing reminder. Completion state is kept. */
+    suspend fun updateReminder(reminder: ServiceReminder): ServiceReminder
+
+    /** Deletes only the selected reminder. Throws if it does not exist. */
+    suspend fun deleteReminder(id: Long)
+
+    /** Clears completion so an accidentally completed reminder becomes due again. */
+    suspend fun reopenReminder(id: Long): ServiceReminder
 }
 
 interface BikeRepository {
@@ -181,6 +190,26 @@ class InMemoryReminderRepository : ReminderRepository {
     override suspend fun getDueReminders(vin: String, currentOdometer: Double, currentTimeMillis: Long): List<ServiceReminder> = reminders.values
         .filter { it.vin == vin && it.isDue(currentOdometer, currentTimeMillis) }
         .toList()
+
+    override suspend fun updateReminder(reminder: ServiceReminder): ServiceReminder = mutex.withLock {
+        val id = requireNotNull(reminder.id) { "Reminder must have an ID" }
+        requireValidReminder(reminder)
+        require(reminders.containsKey(id)) { "Reminder must exist before it can be edited" }
+        reminders[id] = reminder
+        reminder
+    }
+
+    override suspend fun deleteReminder(id: Long): Unit = mutex.withLock {
+        requireNotNull(reminders.remove(id)) { "Reminder must exist before it can be deleted" }
+        Unit
+    }
+
+    override suspend fun reopenReminder(id: Long): ServiceReminder = mutex.withLock {
+        val stored = requireNotNull(reminders[id]) { "Reminder must exist before it can be reopened" }
+        val reopened = stored.copy(completed = false, completedAtMillis = null)
+        reminders[id] = reopened
+        reopened
+    }
 }
 
 class InMemoryBikeRepository : BikeRepository {

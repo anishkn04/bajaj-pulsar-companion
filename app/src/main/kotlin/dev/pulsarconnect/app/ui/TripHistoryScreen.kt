@@ -361,7 +361,7 @@ private fun DeleteTripDialog(
     )
 }
 
-private fun editableOdometer(value: Double): String =
+internal fun editableOdometer(value: Double): String =
     if (value == value.toLong().toDouble()) value.toLong().toString() else value.toString()
 
 internal fun formatRecordNumber(value: Double): String =

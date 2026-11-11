@@ -11,6 +11,7 @@ import dev.pulsarconnect.core.data.TripRepository
 import dev.pulsarconnect.core.data.correctedOdometer
 import dev.pulsarconnect.core.data.isDue
 import dev.pulsarconnect.core.data.requireValidOdometer
+import dev.pulsarconnect.core.data.requireValidReminder
 import dev.pulsarconnect.core.model.BikeProfile
 import dev.pulsarconnect.core.model.ServiceReminder
 import dev.pulsarconnect.core.model.TelemetryPoint
@@ -168,6 +169,33 @@ class AndroidDatabase(
         override suspend fun getDueReminders(vin: String, currentOdometer: Double, currentTimeMillis: Long): List<ServiceReminder> = access { db ->
             db.findReminders(vin).filter { it.isDue(currentOdometer, currentTimeMillis) }
         }
+
+        override suspend fun updateReminder(reminder: ServiceReminder): ServiceReminder = access { db ->
+            db.transaction {
+                requireValidReminder(reminder)
+                val id = requireNotNull(reminder.id) { "Reminder must have an ID" }
+                requireNotNull(findReminder(id)) { "Reminder must exist before it can be edited" }
+                update("service_reminder", reminder.values(), "id = ?", arrayOf(id.toString()))
+                reminder
+            }
+        }
+
+        override suspend fun deleteReminder(id: Long): Unit = access { db ->
+            db.transaction {
+                requireNotNull(findReminder(id)) { "Reminder must exist before it can be deleted" }
+                delete("service_reminder", "id = ?", arrayOf(id.toString()))
+                Unit
+            }
+        }
+
+        override suspend fun reopenReminder(id: Long): ServiceReminder = access { db ->
+            db.transaction {
+                val stored = requireNotNull(findReminder(id)) { "Reminder must exist before it can be reopened" }
+                val reopened = stored.copy(completed = false, completedAtMillis = null)
+                update("service_reminder", reopened.values(), "id = ?", arrayOf(id.toString()))
+                reopened
+            }
+        }
     }
 
     val bikes: BikeRepository = object : BikeRepository {
@@ -294,6 +322,17 @@ private fun SQLiteDatabase.requireBike(vin: String) {
 private fun SQLiteDatabase.findReminders(vin: String): List<ServiceReminder> = query(
     "SELECT * FROM service_reminder WHERE vin = ? ORDER BY due_date_millis IS NULL, due_date_millis ASC, id ASC",
     arrayOf(vin), Cursor::reminder,
+)
+
+private fun SQLiteDatabase.findReminder(id: Long): ServiceReminder? = query(
+    "SELECT * FROM service_reminder WHERE id = ?", arrayOf(id.toString()), Cursor::reminder,
+).singleOrNull()
+
+private fun ServiceReminder.values(): ContentValues = values(
+    "vin" to vin, "title" to title, "description" to description,
+    "due_odometer_km" to dueOdometerKm, "due_date_millis" to dueDateMillis,
+    "completed" to completed, "completed_at_millis" to completedAtMillis,
+    "created_at_millis" to createdAtMillis,
 )
 
 private fun values(vararg fields: Pair<String, Any?>): ContentValues = ContentValues(fields.size).apply {

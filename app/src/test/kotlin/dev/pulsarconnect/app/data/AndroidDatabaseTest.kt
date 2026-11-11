@@ -224,8 +224,65 @@ class AndroidDatabaseTest {
         assertEquals(0L, zeros.dueDateMillis)
     }
 
-    @Test fun bikeUpsertPreservesChildrenAndNullableProfileFields() = runBlocking {
-        val trip = db.trips.startTrip(bike.vin, 0.0, null, null)
+    @Test fun editingRemindersUpdatesRiderFieldsAndPersistsCompletion() = runBlocking {
+        val saved = db.reminders.addReminder(reminder(odometer = 100.0, date = 5_000))
+        db.reminders.completeReminder(saved.id!!, 6_000)
+
+        val updated = db.reminders.updateReminder(db.reminders.getReminders(bike.vin).single().copy(
+            title = "Chain",
+            description = "Clean and lube",
+            dueOdometerKm = 250.0,
+            dueDateMillis = 9_000,
+        ))
+
+        assertEquals("Chain", updated.title)
+        assertEquals("Clean and lube", updated.description)
+        assertEquals(250.0, updated.dueOdometerKm!!, 0.0)
+        assertEquals(9_000L, updated.dueDateMillis)
+        assertTrue(updated.completed)
+        assertEquals(6_000L, updated.completedAtMillis)
+
+        reopen()
+        assertEquals(updated, db.reminders.getReminders(bike.vin).single())
+    }
+
+    @Test fun reminderEditsRejectInvalidContentAndMissingRows() = runBlocking {
+        val saved = db.reminders.addReminder(reminder(odometer = 100.0))
+        for (invalid in listOf(
+            saved.copy(title = " "),
+            saved.copy(dueOdometerKm = null, dueDateMillis = null),
+            saved.copy(dueOdometerKm = -1.0),
+            saved.copy(dueOdometerKm = Double.NaN),
+            saved.copy(id = 9_999),
+        )) {
+            rejects { db.reminders.updateReminder(invalid) }
+        }
+        assertEquals(saved, db.reminders.getReminders(bike.vin).single())
+    }
+
+    @Test fun deletingAndReopeningRemindersTouchesOnlyTheSelectedRow() = runBlocking {
+        val first = db.reminders.addReminder(reminder(odometer = 100.0).copy(title = "First"))
+        val second = db.reminders.addReminder(reminder(odometer = 200.0).copy(title = "Second"))
+        db.reminders.addReminder(reminder(vin = other.vin, odometer = 0.0))
+
+        db.reminders.deleteReminder(first.id!!)
+        assertEquals(listOf(second), db.reminders.getReminders(bike.vin))
+        assertEquals(1, db.reminders.getReminders(other.vin).size)
+
+        db.reminders.completeReminder(second.id!!, 5_000)
+        assertTrue(db.reminders.getDueReminders(bike.vin, 500.0, 10_000).isEmpty())
+        val reopened = db.reminders.reopenReminder(second.id!!)
+        assertFalse(reopened.completed)
+        assertNull(reopened.completedAtMillis)
+        assertEquals(listOf(reopened), db.reminders.getDueReminders(bike.vin, 500.0, 10_000))
+
+        reopen()
+        assertEquals(reopened, db.reminders.getReminders(bike.vin).single())
+        rejects { db.reminders.deleteReminder(first.id!!) }
+        rejects { db.reminders.reopenReminder(first.id!!) }
+    }
+
+    @Test fun bikeUpsertPreservesChildrenAndNullableProfileFields() = runBlocking {        val trip = db.trips.startTrip(bike.vin, 0.0, null, null)
         db.trips.addTelemetry(trip.id!!, point())
         val savedReminder = db.reminders.addReminder(reminder().copy(description = null))
         val updated = BikeProfile(bike.vin, null, null, null, null, null)

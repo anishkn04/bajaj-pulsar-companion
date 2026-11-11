@@ -264,4 +264,65 @@ class SqliteTripReminderRegressionTest {
         for (id in expected) reminders.completeReminder(id!!, 10_001)
         assertTrue(reminders.getDueReminders("VIN", 100.0, 10_000).isEmpty())
     }
+
+    @Test
+    fun `editing a reminder replaces rider fields and persists completion`() = runTest {
+        val saved = reminders.addReminder(reminder(10_000, 500.0))
+        reminders.completeReminder(saved.id!!, 12_000)
+
+        val updated = reminders.updateReminder(reminders.getReminders("VIN").single().copy(
+            title = "Chain",
+            description = "Clean and lube",
+            dueOdometerKm = 800.0,
+            dueDateMillis = 30_000,
+        ))
+
+        assertEquals("Chain", updated.title)
+        assertEquals("Clean and lube", updated.description)
+        assertEquals(800.0, updated.dueOdometerKm)
+        assertEquals(30_000L, updated.dueDateMillis)
+        assertTrue(updated.completed)
+        assertEquals(12_000L, updated.completedAtMillis)
+        assertEquals(updated, reminders.getReminders("VIN").single())
+    }
+
+    @Test
+    fun `editing rejects invalid or missing reminders and leaves stored data intact`() = runTest {
+        val saved = reminders.addReminder(reminder(10_000, 500.0))
+        for (invalid in listOf(
+            saved.copy(title = " "),
+            saved.copy(dueOdometerKm = null, dueDateMillis = null),
+            saved.copy(dueOdometerKm = -1.0),
+            saved.copy(dueOdometerKm = Double.NaN),
+            saved.copy(id = Long.MAX_VALUE),
+        )) {
+            assertThrows(IllegalArgumentException::class.java) {
+                runBlocking { reminders.updateReminder(invalid) }
+            }
+        }
+        assertEquals(saved, reminders.getReminders("VIN").single())
+    }
+
+    @Test
+    fun `deleting removes only the selected reminder and reopening makes it due again`() = runTest {
+        val first = reminders.addReminder(reminder(10_000, 100.0))
+        val second = reminders.addReminder(reminder(20_000, 200.0))
+
+        reminders.deleteReminder(first.id!!)
+        assertEquals(listOf(second), reminders.getReminders("VIN"))
+
+        reminders.completeReminder(second.id!!, 12_000)
+        assertTrue(reminders.getDueReminders("VIN", 500.0, 25_000).isEmpty())
+        val reopened = reminders.reopenReminder(second.id!!)
+        assertFalse(reopened.completed)
+        assertNull(reopened.completedAtMillis)
+        assertEquals(listOf(reopened), reminders.getDueReminders("VIN", 500.0, 25_000))
+
+        assertThrows(IllegalArgumentException::class.java) {
+            runBlocking { reminders.deleteReminder(first.id!!) }
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            runBlocking { reminders.reopenReminder(first.id!!) }
+        }
+    }
 }

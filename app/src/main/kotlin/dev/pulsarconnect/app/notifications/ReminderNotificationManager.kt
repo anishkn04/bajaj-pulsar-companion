@@ -91,6 +91,29 @@ class ReminderNotificationManager(
         }
     }
 
+    override fun onReminderRearmed(id: Long) {
+        synchronized(deliveryGate) {
+            forget(DELIVERED, id)
+            notifications.cancel(tag(id), NOTIFICATION_ID)
+        }
+    }
+
+    override fun onReminderReopened(id: Long) {
+        synchronized(deliveryGate) {
+            forget(COMPLETED, id)
+            forget(DELIVERED, id)
+            notifications.cancel(tag(id), NOTIFICATION_ID)
+        }
+    }
+
+    override fun onReminderDeleted(id: Long) {
+        synchronized(deliveryGate) {
+            forget(COMPLETED, id)
+            forget(DELIVERED, id)
+            notifications.cancel(tag(id), NOTIFICATION_ID)
+        }
+    }
+
     private fun schedule() {
         ensureChannel()
         work.enqueueUniquePeriodicWork(
@@ -120,6 +143,11 @@ class ReminderNotificationManager(
         val ids = preferences.getStringSet(key, emptySet())!!.toMutableSet()
         ids.add(id.toString())
         preferences.edit().putStringSet(key, ids).apply()
+    }
+
+    private fun forget(key: String, id: Long) {
+        val ids = preferences.getStringSet(key, emptySet())!!.toMutableSet()
+        if (ids.remove(id.toString())) preferences.edit().putStringSet(key, ids).apply()
     }
 
     private fun canPost(): Boolean =

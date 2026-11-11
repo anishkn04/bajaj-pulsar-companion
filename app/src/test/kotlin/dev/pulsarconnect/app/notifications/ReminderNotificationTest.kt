@@ -380,6 +380,53 @@ class ReminderNotificationTest {
         assertTrue(notifications.activeNotifications.isEmpty())
     }
 
+    @Test fun `rearming an edited reminder clears delivery so the new threshold can alert`() = runBlocking {
+        val reminder = due(date = 1_000)
+        manager.setEnabled(true)
+        worker().doWork()
+        assertEquals(1, notifications.activeNotifications.size)
+
+        reminders.updateReminder(reminder.copy(dueDateMillis = 9_000_000_000_000))
+        manager.onReminderRearmed(reminder.id!!)
+        worker().doWork()
+        assertTrue(notifications.activeNotifications.isEmpty())
+
+        reminders.updateReminder(reminder.copy(dueDateMillis = 1_000))
+        worker().doWork()
+        assertEquals(1, notifications.activeNotifications.size)
+    }
+
+    @Test fun `reopening completion re-arms the same reminder`() = runBlocking {
+        val reminder = due()
+        manager.setEnabled(true)
+        worker().doWork()
+        assertEquals(1, notifications.activeNotifications.size)
+
+        reminders.completeReminder(reminder.id!!, 2_000)
+        manager.onReminderCompleted(reminder.id!!)
+        worker().doWork()
+        assertTrue(notifications.activeNotifications.isEmpty())
+
+        reminders.reopenReminder(reminder.id!!)
+        manager.onReminderReopened(reminder.id!!)
+        worker().doWork()
+        assertEquals(1, notifications.activeNotifications.size)
+    }
+
+    @Test fun `deleting a reminder forgets its delivery and completion markers`() = runBlocking {
+        val reminder = due()
+        manager.setEnabled(true)
+        worker().doWork()
+        manager.onReminderCompleted(reminder.id!!)
+
+        manager.onReminderDeleted(reminder.id!!)
+
+        val prefs = context.getSharedPreferences("service_reminder_notifications", Context.MODE_PRIVATE)
+        assertFalse(prefs.getStringSet("delivered_ids", emptySet())!!.contains(reminder.id.toString()))
+        assertFalse(prefs.getStringSet("completed_ids", emptySet())!!.contains(reminder.id.toString()))
+        assertTrue(notifications.activeNotifications.isEmpty())
+    }
+
     @Test fun `long IDs do not collide and malformed foreign repository results are excluded`() = runBlocking {
         val base = due()
         val repo = object : ReminderRepository by reminders {
