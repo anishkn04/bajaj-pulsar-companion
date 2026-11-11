@@ -35,13 +35,13 @@ Within a priority, work top to bottom unless there is a reason to reorder.
 The app has `allowBackup="false"` and no export, so losing the phone loses all trips and
 reminders. A mistyped odometer is also currently unfixable. This is the highest-value work.
 
-- [x] **PC-01 — Export local records.**
+- [x] **PC-01 — Export local records.** (`542fa91`)
   Write a versioned JSON export through the Storage Access Framework (create document). Include
   bike profiles, trips, reminders, and telemetry behind a schema version. Exclude credentials,
   tokens, notification content, and Bluetooth addresses. Offer a "redact VIN" option.
   Acceptance: round-trips through the restore path in a test; export contains no secret fields.
 
-- [x] **PC-02 — Restore from export.**
+- [x] **PC-02 — Restore from export.** (`542fa91`)
   Open a user-picked JSON file, validate the schema version, and confirm before replacing local
   data. Merge and replace must both be explicit. Reject unknown/newer versions with a clear
   message. Acceptance: tests cover a valid file, a wrong-version file, and malformed JSON.
