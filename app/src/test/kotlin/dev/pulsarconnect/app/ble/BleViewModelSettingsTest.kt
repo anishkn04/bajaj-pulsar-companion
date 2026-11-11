@@ -267,6 +267,7 @@ class BleViewModelSettingsTest {
 
         override suspend fun connect(
             target: dev.pulsarconnect.core.ble.BikeTarget,
+            passive: Boolean,
         ): BleSession = SupportedSession()
 
         private class SupportedSession : BleSession {

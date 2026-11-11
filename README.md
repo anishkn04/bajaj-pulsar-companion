@@ -12,7 +12,7 @@ This is an interoperability research project, not an official Bajaj app. Initial
 - **Service reminders:** create reminders with a due odometer, a calendar date, or both; mark them complete. Either threshold makes a reminder due, whichever comes first.
 - **Optional background alerts:** local WorkManager checks notify you of due reminders, with Android permission/channel controls, persistent duplicate suppression, and sign-out/opt-out cancellation.
 - **Bike link foundation:** scan for nearby BLE devices, remember the selected bike per VIN, connect and inspect raw GATT services, and optionally auto-connect while the app is in the foreground.
-- **Background mirroring and boot resume:** a `connectedDevice` foreground service keeps the bike link alive when the app is backgrounded; after reboot the link resumes when mirroring, background mode and boot resume are all on and a bike is selected. Mirroring, background and boot are all on by default on a fresh install.
+- **Background mirroring and boot resume:** a `connectedDevice` foreground service keeps the bike link alive when the app is backgrounded and holds a passive GATT connection so the link reattaches when the bike is switched on; after reboot the link resumes when mirroring, background mode and boot resume are all on and a bike is selected. Mirroring, background and boot are all on by default on a fresh install.
 - **Opt-in battery and signal mirroring:** send only the verified idle phone-status frame to the cluster, with MTU-safe writes. Session-scoped and read-only CONTROL polling for diagnostics. No cluster telemetry is decoded yet.
 - **Per-bike persistence:** Android-native SQLite stores profiles, trips, telemetry records and reminders in app-private storage.
 - **Safe recovery:** failed local reads offer a read-only retry; a failed refresh after a successful save does not invite duplicate writes.
@@ -35,13 +35,15 @@ background mode and boot resume.
   restarts. Returning to the foreground requires a fresh opt-in
   if background mode is off.
 - **Keep mirroring in background** (on by default): runs a `connectedDevice` foreground service
-  so mirroring survives leaving the app. Stops when you turn mirroring off. If notification
+  so mirroring survives leaving the app. Stops when you turn mirroring off. While it is armed the
+  service keeps a low-power passive GATT connection, so switching the bike on reattaches the link
+  by itself without periodic scanning or opening the app. Passive waits are handled by Android's
+  Bluetooth stack; a five-minute watchdog re-arms the wait if the stack drops it. If notification
   permission is denied, the service still runs but no notification is shown; Settings offers a
   shortcut to grant it.
 - **Resume mirroring after reboot** (on by default): after reboot, the link resumes when
-  mirroring + background mode + boot resume are all on and a bike is selected. There is no
-  indefinite background retry — if the bike is out of range at boot, the link resumes once and
-  waits for the next foreground or reconnect attempt.
+  mirroring + background mode + boot resume are all on and a bike is selected. If the bike is off
+  at boot, the service waits for it to power on instead of failing once.
 - **Auto-connect** retries an opted-in connection on app foreground, including after Bluetooth
   or permission availability changes. Disabling it keeps a healthy connection open but stops
   pending retries and prevents reconnection after the next disconnect.

@@ -89,7 +89,7 @@ class AndroidBleTransport(
     }
 
     @SuppressLint("MissingPermission")
-    override suspend fun connect(target: BikeTarget): BleSession = withContext(Dispatchers.IO) {
+    override suspend fun connect(target: BikeTarget, passive: Boolean): BleSession = withContext(Dispatchers.IO) {
         val missing = missingPermissions()
         if (missing.isNotEmpty()) throw BleException(BleFailure.PermissionDenied(missing))
 
@@ -105,7 +105,9 @@ class AndroidBleTransport(
 
         val callback = Callback()
         val gatt = try {
-            device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)
+            // A passive client is kept by the Bluetooth stack and connects when the bike
+            // advertises again. It avoids background polling/scanning while the bike is off.
+            device.connectGatt(context, passive, callback, BluetoothDevice.TRANSPORT_LE)
         } catch (error: SecurityException) {
             throw BleException(
                 BleFailure.PermissionDenied(

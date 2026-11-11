@@ -130,6 +130,94 @@ class BikeLinkControllerTest {
     }
 
     @Test
+    fun `background mode keeps waiting after the first connect failure`() = runTest {
+        devices.select(target)
+        fake.connectFailure = BleException(BleFailure.GattError("connect", 133))
+        val preferences = InMemoryBikeLinkPreferences(
+            BikeLinkSettings(mirroring = true, keepInBackground = true),
+        )
+        val (controller, _) = controller(preferences)
+
+        controller.onSession(vin)
+        runCurrent()
+
+        assertTrue(controller.state.value.connection is ConnectionState.WaitingForBike)
+        assertEquals(listOf(true), fake.passiveCalls)
+
+        fake.connectFailure = null
+        advanceTimeBy(BikeConnection.DEFAULT_WAITING_RETRY_DELAYS.first() + 1)
+        runCurrent()
+
+        assertTrue(controller.state.value.connection is ConnectionState.Connected)
+        assertTrue(controller.state.value.mirroringActive)
+    }
+
+    @Test
+    fun `the background service adopts a passive wait after a process restart`() = runTest {
+        devices.select(target)
+        fake.connectFailure = BleException(BleFailure.GattError("connect", 133))
+        val preferences = InMemoryBikeLinkPreferences(
+            BikeLinkSettings(
+                mirroring = true,
+                keepInBackground = true,
+                startOnBoot = true,
+                armedVin = vin,
+            ),
+        )
+        val (controller, _) = controller(preferences)
+
+        controller.ensureRunning()
+        runCurrent()
+
+        assertTrue(controller.state.value.connection is ConnectionState.WaitingForBike)
+        assertEquals(listOf(true), fake.passiveCalls)
+
+        fake.connectFailure = null
+        advanceTimeBy(BikeConnection.DEFAULT_WAITING_RETRY_DELAYS.first() + 1)
+        runCurrent()
+
+        assertTrue(controller.state.value.connection is ConnectionState.Connected)
+    }
+
+    @Test
+    fun `turning background mode off stops waiting and reports the failure`() = runTest {
+        devices.select(target)
+        fake.connectFailure = BleException(BleFailure.GattError("connect", 133))
+        val preferences = InMemoryBikeLinkPreferences(
+            BikeLinkSettings(mirroring = true, keepInBackground = true),
+        )
+        val (controller, _) = controller(preferences)
+        controller.onSession(vin)
+        runCurrent()
+        assertTrue(controller.state.value.connection is ConnectionState.WaitingForBike)
+
+        controller.setKeepInBackground(false)
+        runCurrent()
+
+        assertTrue(controller.state.value.connection is ConnectionState.Failed)
+        assertFalse(fake.passiveCalls.last())
+    }
+
+    @Test
+    fun `signing out stops waiting for the bike`() = runTest {
+        devices.select(target)
+        fake.connectFailure = BleException(BleFailure.GattError("connect", 133))
+        val preferences = InMemoryBikeLinkPreferences(
+            BikeLinkSettings(mirroring = true, keepInBackground = true),
+        )
+        val (controller, _) = controller(preferences)
+        controller.onSession(vin)
+        runCurrent()
+        assertTrue(controller.state.value.connection is ConnectionState.WaitingForBike)
+
+        controller.signOut()
+        runCurrent()
+
+        assertEquals(ConnectionState.Idle, controller.state.value.connection)
+        assertNull(preferences.settings.value.armedVin)
+    }
+
+    @Test
     fun `without background mode leaving the app stops the link but keeps the intent`() = runTest {
         devices.select(target)
         val (controller, _) = controller()

@@ -42,6 +42,14 @@ class BikeLinkStatusTextTest {
     }
 
     @Test
+    fun `a passive background wait is shown truthfully`() {
+        val connection = ConnectionState.WaitingForBike(target)
+
+        assertEquals("Waiting for bike…", bleStatusValue(connection))
+        assertTrue(bleStatusDetail(BleUiState(connection = connection)).contains("attach by itself"))
+    }
+
+    @Test
     fun `enabled but not sending never claims mirroring is active`() {
         val state = BleUiState(
             connection = connected(),

@@ -25,11 +25,13 @@ class FakeBleTransport : BleTransport {
     val sessions = mutableListOf<FakeBleSession>()
     var connectCalls: Int = 0
         private set
+    val passiveCalls = mutableListOf<Boolean>()
 
     override fun missingPermissions(): Set<BlePermission> = missing
 
-    override suspend fun connect(target: BikeTarget): BleSession {
+    override suspend fun connect(target: BikeTarget, passive: Boolean): BleSession {
         connectCalls++
+        passiveCalls += passive
         if (connectDelayMillis > 0) delay(connectDelayMillis)
         connectFailure?.let { throw it }
         return FakeBleSession(this).also { sessions += it }

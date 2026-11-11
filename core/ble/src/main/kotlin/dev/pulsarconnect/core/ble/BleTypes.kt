@@ -116,7 +116,14 @@ interface BleTransport {
     /** Re-reads the platform adapter state, e.g. after permission is granted. */
     fun refreshAdapterState() = Unit
 
-    suspend fun connect(target: BikeTarget): BleSession
+    /**
+     * Opens a GATT client to [target].
+     *
+     * [passive] asks the platform to hold a background connection and attach when the bike
+     * next advertises, instead of making one immediate connection attempt. It costs no radio
+     * scanning while the bike is off, but may take longer to complete.
+     */
+    suspend fun connect(target: BikeTarget, passive: Boolean = false): BleSession
 }
 
 /** Raw scan events; the Android adapter implements this with BluetoothLeScanner. */

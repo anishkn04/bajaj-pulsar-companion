@@ -33,6 +33,13 @@ sealed interface ConnectionState {
         val attempt: Int,
         val retryAtMillis: Long,
     ) : ConnectionState
+
+    /**
+     * Background mode is armed but the bike is not reachable yet. Android holds a passive GATT
+     * connection and attaches by itself when the bike advertises; no scanning or polling runs.
+     */
+    data class WaitingForBike(val target: BikeTarget) : ConnectionState
+
     data class Failed(
         val target: BikeTarget?,
         val reason: BleFailure,
@@ -59,6 +66,8 @@ class BikeConnection(
     private val reconnectDelaysMillis: List<Long> = DEFAULT_RECONNECT_DELAYS,
     private val maxReconnectAttempts: Int = DEFAULT_MAX_RECONNECT_ATTEMPTS,
     private val stableConnectionMillis: Long = DEFAULT_STABLE_CONNECTION_MILLIS,
+    private val passiveConnectTimeoutMillis: Long = DEFAULT_PASSIVE_CONNECT_TIMEOUT_MILLIS,
+    private val waitingRetryDelaysMillis: List<Long> = DEFAULT_WAITING_RETRY_DELAYS,
     private val jitter: (Long) -> Long = { base ->
         (base * (0.8 + Random.nextDouble() * 0.4)).toLong()
     },
@@ -73,6 +82,9 @@ class BikeConnection(
         require(reconnectDelaysMillis.all { it >= 0 }) { "Reconnect delays must be nonnegative" }
         require(maxReconnectAttempts >= 0) { "Reconnect attempt limit must be nonnegative" }
         require(stableConnectionMillis >= 0) { "Stable connection duration must be nonnegative" }
+        require(passiveConnectTimeoutMillis > 0) { "Passive connect timeout must be positive" }
+        require(waitingRetryDelaysMillis.isNotEmpty()) { "At least one waiting retry delay is required" }
+        require(waitingRetryDelaysMillis.all { it >= 0 }) { "Waiting retry delays must be nonnegative" }
     }
 
     private val _state = MutableStateFlow<ConnectionState>(ConnectionState.Idle)
@@ -86,9 +98,17 @@ class BikeConnection(
     /**
      * Connects to [target]. An unexpected disconnect retries while [autoReconnect] is true.
      * Calling again replaces the previous target and closes its session.
+     *
+     * [waitForBike] keeps a background run alive across terminal failures: it asks Android for
+     * passive GATT connections instead of immediate ones, so the phone attaches when the bike
+     * powers on. Rider-facing foreground connects leave it off so failures surface quickly.
      */
-    fun connect(target: BikeTarget, autoReconnect: Boolean = true) {
-        val run = Run(target, autoReconnect)
+    fun connect(
+        target: BikeTarget,
+        autoReconnect: Boolean = true,
+        waitForBike: Boolean = false,
+    ) {
+        val run = Run(target, autoReconnect, waitForBike)
         lastRun = run
         val version = ++generation
         job?.cancel()
@@ -110,6 +130,24 @@ class BikeConnection(
     }
 
     /**
+     * Toggles low-power waiting on the current run. Enabling revives a terminal failure;
+     * disabling releases a passive wait. Does nothing without a run.
+     */
+    fun setWaitForBike(enabled: Boolean) {
+        val run = lastRun ?: return
+        if (run.waitForBike == enabled) return
+        run.waitForBike = enabled
+        val current = _state.value
+        if (enabled) {
+            if (current is ConnectionState.Failed) {
+                connect(run.target, run.autoReconnect, waitForBike = true)
+            }
+        } else if (current is ConnectionState.WaitingForBike) {
+            cancelRun()
+        }
+    }
+
+    /**
      * Updates the current run and manual retry policy without replacing a healthy session.
      * Disabling cancels pending automatic waits; enabling never starts a connection by itself.
      */
@@ -118,13 +156,14 @@ class BikeConnection(
         run.autoReconnect = enabled
         val current = _state.value
         val waitingToReconnect = current is ConnectionState.Reconnecting ||
+            current is ConnectionState.WaitingForBike ||
             (current is ConnectionState.BluetoothUnavailable && job?.isActive == true)
         if (!enabled && waitingToReconnect) cancelRun()
     }
 
     /** Retries the last target after a failure or a disabled adapter. */
     fun retry() {
-        lastRun?.let { connect(it.target, it.autoReconnect) }
+        lastRun?.let { connect(it.target, it.autoReconnect, it.waitForBike) }
     }
 
     fun stop() {
@@ -238,16 +277,28 @@ class BikeConnection(
         while (version == generation) {
             currentCoroutineContext().ensureActive()
 
-            if (attempt > 0) {
+            if (attempt > 0 && run.waitForBike) {
+                // Passive waits are event-driven; this delay only spaces out repeated failures
+                // (for example a stack that rejects background connections immediately).
+                publish(version, ConnectionState.WaitingForBike(target))
+                delay(jitter(waitingDelayFor(attempt)).coerceAtLeast(0))
+                if (version != generation) return
+            } else if (attempt > 0) {
                 val wait = jitter(delayFor(attempt)).coerceAtLeast(0)
                 publish(version, ConnectionState.Reconnecting(target, attempt, clock() + wait))
                 delay(wait)
                 if (version != generation) return
+            } else if (run.waitForBike) {
+                publish(version, ConnectionState.WaitingForBike(target))
             }
 
             if (transport.adapterState.value == AdapterState.OFF) {
                 publish(version, ConnectionState.BluetoothUnavailable)
-                return
+                if (!run.waitForBike || !run.autoReconnect) return
+                transport.adapterState.first { it == AdapterState.ON }
+                if (version != generation) return
+                attempt = 0
+                continue
             }
             val missing = transport.missingPermissions()
             if (missing.isNotEmpty()) {
@@ -255,10 +306,23 @@ class BikeConnection(
                 return
             }
 
-            publish(version, ConnectionState.Connecting(target, attempt))
+            if (!run.waitForBike) {
+                publish(version, ConnectionState.Connecting(target, attempt))
+            }
             val newSession = try {
-                withTimeout(connectTimeoutMillis) { transport.connect(target) }
+                if (run.waitForBike) {
+                    withTimeout(passiveConnectTimeoutMillis) {
+                        transport.connect(target, passive = true)
+                    }
+                } else {
+                    withTimeout(connectTimeoutMillis) { transport.connect(target) }
+                }
             } catch (timeout: TimeoutCancellationException) {
+                if (run.waitForBike) {
+                    // The bike stayed off for the whole passive window; re-arm immediately.
+                    attempt++
+                    continue
+                }
                 if (attempt == 0) {
                     publish(version, ConnectionState.Failed(target, BleFailure.ConnectTimeout(connectTimeoutMillis)))
                     return
@@ -268,6 +332,10 @@ class BikeConnection(
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (error: BleException) {
+                if (run.waitForBike) {
+                    attempt++
+                    continue
+                }
                 if (attempt == 0) {
                     publish(version, ConnectionState.Failed(target, error.failure))
                     return
@@ -275,6 +343,10 @@ class BikeConnection(
                 attempt = nextAttempt(version, target, attempt) ?: return
                 continue
             } catch (error: Exception) {
+                if (run.waitForBike) {
+                    attempt++
+                    continue
+                }
                 if (attempt == 0) {
                     publish(version, ConnectionState.Failed(target, unexpected(error)))
                     return
@@ -293,6 +365,10 @@ class BikeConnection(
                 withTimeout(discoveryTimeoutMillis) { newSession.services() }
             } catch (timeout: TimeoutCancellationException) {
                 closeSession(newSession)
+                if (run.waitForBike) {
+                    attempt++
+                    continue
+                }
                 if (attempt == 0) {
                     publish(version, ConnectionState.Failed(target, BleFailure.DiscoveryTimeout(discoveryTimeoutMillis)))
                     return
@@ -303,6 +379,10 @@ class BikeConnection(
                 throw cancellation
             } catch (error: BleException) {
                 closeSession(newSession)
+                if (run.waitForBike) {
+                    attempt++
+                    continue
+                }
                 if (attempt == 0) {
                     publish(version, ConnectionState.Failed(target, error.failure))
                     return
@@ -311,6 +391,10 @@ class BikeConnection(
                 continue
             } catch (error: Exception) {
                 closeSession(newSession)
+                if (run.waitForBike) {
+                    attempt++
+                    continue
+                }
                 if (attempt == 0) {
                     publish(
                         version,
@@ -344,6 +428,10 @@ class BikeConnection(
                 }
             } catch (timeout: TimeoutCancellationException) {
                 closeSession(newSession)
+                if (run.waitForBike) {
+                    attempt++
+                    continue
+                }
                 handshakeFailures++
                 if (handshakeFailures >= maxHandshakeAttempts) {
                     publish(version, ConnectionState.Failed(target, BleFailure.NotResponding))
@@ -363,6 +451,10 @@ class BikeConnection(
                         publish(version, ConnectionState.Failed(target, disconnected))
                         return
                     }
+                    if (run.waitForBike) {
+                        attempt++
+                        continue
+                    }
                     attempt++
                     if (attempt > maxReconnectAttempts) {
                         publish(
@@ -374,6 +466,10 @@ class BikeConnection(
                         )
                         return
                     }
+                    continue
+                }
+                if (run.waitForBike) {
+                    attempt++
                     continue
                 }
                 handshakeFailures++
@@ -398,6 +494,7 @@ class BikeConnection(
             handshakeFailures = 0
 
             publish(version, ConnectionState.Connected(target, services, clock()))
+            if (run.waitForBike) attempt = 0
             val connectedAt = clock()
             val outcome = try {
                 awaitDisconnect(newSession)
@@ -424,6 +521,12 @@ class BikeConnection(
                             ConnectionState.Failed(target, BleFailure.Disconnected(outcome.status)),
                         )
                         return
+                    }
+                    if (run.waitForBike) {
+                        // Keep the background link armed; a passive connection reattaches when
+                        // the bike powers back on, without polling or an attempt limit.
+                        attempt = 1
+                        continue
                     }
                     attempt = if (clock() - connectedAt >= stableConnectionMillis) {
                         1
@@ -502,10 +605,19 @@ class BikeConnection(
         return reconnectDelaysMillis[index]
     }
 
+    private fun waitingDelayFor(attempt: Int): Long {
+        val index = (attempt - 1).coerceIn(0, waitingRetryDelaysMillis.lastIndex)
+        return waitingRetryDelaysMillis[index]
+    }
+
     private fun unexpected(error: Exception): BleFailure =
         BleFailure.Unexpected(error.message ?: error::class.simpleName ?: "Unknown Bluetooth error")
 
-    private data class Run(val target: BikeTarget, var autoReconnect: Boolean)
+    private data class Run(
+        val target: BikeTarget,
+        var autoReconnect: Boolean,
+        var waitForBike: Boolean,
+    )
 
     private sealed interface DisconnectOutcome {
         data object AdapterOff : DisconnectOutcome
@@ -521,5 +633,15 @@ class BikeConnection(
         const val DEFAULT_MAX_RECONNECT_ATTEMPTS: Int = 10
         const val DEFAULT_STABLE_CONNECTION_MILLIS: Long = 60_000
         val DEFAULT_RECONNECT_DELAYS: List<Long> = listOf(1_000, 2_000, 4_000, 8_000, 16_000, 30_000)
+
+        /**
+         * How long a single passive connection may wait for the bike to advertise. This is a
+         * watchdog, not a poll interval: the platform attaches as soon as the bike appears.
+         */
+        const val DEFAULT_PASSIVE_CONNECT_TIMEOUT_MILLIS: Long = 5 * 60_000
+
+        /** Spacing between passive re-arms when the stack reports an immediate failure. */
+        val DEFAULT_WAITING_RETRY_DELAYS: List<Long> =
+            listOf(10_000, 30_000, 60_000, 2 * 60_000)
     }
 }

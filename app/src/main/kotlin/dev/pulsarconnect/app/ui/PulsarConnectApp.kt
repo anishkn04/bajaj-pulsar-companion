@@ -297,6 +297,7 @@ internal fun bleStatusValue(connection: ConnectionState): String = when (connect
     is ConnectionState.Connecting, is ConnectionState.Discovering -> "Connecting…"
     is ConnectionState.Connected -> "Connected"
     is ConnectionState.Reconnecting -> "Reconnecting…"
+    is ConnectionState.WaitingForBike -> "Waiting for bike…"
     is ConnectionState.Failed -> when (connection.reason) {
         BleFailure.NotResponding, is BleFailure.TooManyAttempts -> "Bike not responding"
         else -> "Connection failed"
@@ -340,6 +341,8 @@ internal fun bleStatusDetail(state: BleUiState): String = when (val connection =
         "$target · $count GATT service${if (count == 1) "" else "s"} discovered.$mirroring"
     }
     is ConnectionState.Failed -> bleFailureText(connection.reason)
+    is ConnectionState.WaitingForBike ->
+        "Background mode is armed. Turn the bike on and the link will attach by itself."
     ConnectionState.BluetoothUnavailable -> "Turn on Bluetooth, then open the bike link."
     is ConnectionState.MissingPermissions -> "Grant nearby-device access to scan for your bike."
     else -> if (state.selected != null) {

@@ -221,6 +221,11 @@ internal fun BikeConnectionScreen(
                         onClick = onRetry,
                         icon = Icons.Outlined.Refresh,
                     )
+                    is ConnectionState.WaitingForBike -> PillButton(
+                        label = "Retry now",
+                        onClick = onRetry,
+                        icon = Icons.Outlined.Refresh,
+                    )
                     is ConnectionState.MissingPermissions -> PillButton(
                         label = "Grant access and connect",
                         onClick = { request(PendingBleAction.CONNECT) },
@@ -698,6 +703,7 @@ private fun connectionTone(connection: ConnectionState): StatusTone = when (conn
     is ConnectionState.Connecting,
     is ConnectionState.Discovering,
     is ConnectionState.Reconnecting,
+    is ConnectionState.WaitingForBike,
     -> StatusTone.Warning
     is ConnectionState.MissingPermissions,
     ConnectionState.BluetoothUnavailable,

@@ -326,6 +326,7 @@ class BleViewModelPhoneStatusTest {
 
         override suspend fun connect(
             target: dev.pulsarconnect.core.ble.BikeTarget,
+            passive: Boolean,
         ): dev.pulsarconnect.core.ble.BleSession = error("not used in these tests")
 
         class SupportedSession : BleSession {

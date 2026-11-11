@@ -358,7 +358,7 @@ class BleViewModelTest {
         var missing: Set<BlePermission> = emptySet()
         override fun missingPermissions(): Set<BlePermission> = missing
 
-        override suspend fun connect(target: BikeTarget): BleSession =
+        override suspend fun connect(target: BikeTarget, passive: Boolean): BleSession =
             FakeSession().also {
                 connectCalls++
                 sessions += it

@@ -129,6 +129,7 @@ class BikeLinkController(
 
     fun onForeground() {
         suspended = false
+        connection.setWaitForBike(shouldWaitForBike())
         ensureConnectedIfWanted(retryFailure = true)
     }
 
@@ -137,8 +138,13 @@ class BikeLinkController(
      * The mirroring intent itself stays armed so returning to the app resumes it.
      */
     fun onBackground() {
-        if (preferences.settings.value.runsInBackground) return
+        if (preferences.settings.value.runsInBackground) {
+            // Keep the link armed and let Android attach passively when the bike powers on.
+            connection.setWaitForBike(true)
+            return
+        }
         suspended = true
+        connection.setWaitForBike(false)
         stopRuntime()
         connection.stop()
     }
@@ -150,10 +156,12 @@ class BikeLinkController(
         preferences.setMirroring(enabled)
         if (!enabled) {
             stopRuntime()
+            connection.setWaitForBike(false)
             connection.setAutoReconnect(_state.value.autoConnect)
             _state.update { it.copy(mirroringError = null) }
         } else {
             connection.setAutoReconnect(true)
+            connection.setWaitForBike(shouldWaitForBike())
             ensureConnectedIfWanted(retryFailure = true)
         }
     }
@@ -230,7 +238,20 @@ class BikeLinkController(
         connection.connect(
             target,
             autoReconnect = preferences.settings.value.mirroring || _state.value.autoConnect,
+            waitForBike = shouldWaitForBike(),
         )
+    }
+
+    /**
+     * True while Android may hold a passive connection: the rider armed background mirroring
+     * and the app is not suspended. Keeps the link armed across bike power cycles.
+     */
+    private fun shouldWaitForBike(): Boolean {
+        val settings = preferences.settings.value
+        return !suspended &&
+            settings.runsInBackground &&
+            settings.armedVin != null &&
+            _state.value.selected != null
     }
 
     /** Connects only when the rider wants a link, optionally reviving a terminal failure. */
@@ -245,6 +266,7 @@ class BikeLinkController(
             is ConnectionState.Connecting,
             is ConnectionState.Discovering,
             is ConnectionState.Reconnecting,
+            is ConnectionState.WaitingForBike,
             -> return
             else -> connectTo(target)
         }
@@ -252,6 +274,7 @@ class BikeLinkController(
 
     private fun reconcile() {
         val settings = preferences.settings.value
+        connection.setWaitForBike(shouldWaitForBike())
         val connected = connection.state.value as? ConnectionState.Connected
 
         val phoneEndpoint = connected != null &&
