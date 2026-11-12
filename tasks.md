@@ -3,7 +3,7 @@
 Single source of truth for planned work. Keep it current: an agent session starts by reading
 this file and ends by updating it.
 
-Last updated: 2026-11-11
+Last updated: 2026-11-12
 
 ## How to use this file
 
@@ -81,7 +81,7 @@ reminders. A mistyped odometer is also currently unfixable. This is the highest-
 A silently broken mirroring setup currently looks the same as a working one until the rider is
 already riding. Make health and failures visible without opening the app.
 
-- [ ] **PC-10 — Home setup-health card.**
+- [x] **PC-10 — Home setup-health card.** (`2c97f63`)
   One card showing BLE permissions, notification access, notification permission, battery
   optimization, background mode, boot resume, and selected bike. Show "Ready to mirror" or a
   count of items needing attention, with the existing deep links. Acceptance: each item's
