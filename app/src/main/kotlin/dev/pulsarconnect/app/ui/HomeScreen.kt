@@ -1,5 +1,6 @@
 package dev.pulsarconnect.app.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,14 +9,27 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.pulsarconnect.app.ble.BleUiState
 
 @Composable
@@ -26,12 +40,15 @@ internal fun HomeScreen(
     onTrips: () -> Unit,
     onReminders: () -> Unit,
     onBike: () -> Unit,
+    onSettings: () -> Unit,
     onClearError: () -> Unit,
     onRetry: () -> Unit,
 ) {
+    val context = LocalContext.current
     val now = rememberCurrentTimeMillis()
     val pending = state.reminders.count { !it.completed }
     val due = reminderDueCount(state, now)
+    val health = rememberSetupHealth(bleState)
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -51,6 +68,20 @@ internal fun HomeScreen(
         )
 
         LocalDataStatus(state, onClearError, onRetry)
+
+        SetupHealthCard(health) { action ->
+            when (action) {
+                SetupHealthAction.BIKE_PERMISSIONS,
+                SetupHealthAction.SELECTED_BIKE -> onBike()
+
+                SetupHealthAction.BACKGROUND_MODE,
+                SetupHealthAction.BOOT_RESUME -> onSettings()
+
+                SetupHealthAction.NOTIFICATION_ACCESS -> openNotificationAccessSettings(context)
+                SetupHealthAction.NOTIFICATION_PERMISSION -> openAppNotificationSettings(context)
+                SetupHealthAction.BATTERY_OPTIMIZATION -> openBatteryOptimizationSettings(context)
+            }
+        }
 
         HomeFeatureCard(
             title = "Bike link",
@@ -96,6 +127,107 @@ internal fun HomeScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun rememberSetupHealth(bleState: BleUiState): SetupHealth {
+    val context = LocalContext.current
+    var resumeVersion by remember { mutableIntStateOf(0) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) resumeVersion++
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val notificationsGranted = remember(context, resumeVersion) {
+        notificationPermissionGranted(context)
+    }
+    val batteryIgnored = remember(context, resumeVersion) {
+        batteryOptimizationIgnored(context)
+    }
+    return remember(bleState, notificationsGranted, batteryIgnored) {
+        setupHealth(bleState, notificationsGranted, batteryIgnored)
+    }
+}
+
+@Composable
+private fun SetupHealthCard(
+    health: SetupHealth,
+    onAction: (SetupHealthAction) -> Unit,
+) {
+    PulsarCard {
+        Text(
+            text = "Setup health",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Text(
+            text = health.summary,
+            style = MaterialTheme.typography.titleLarge,
+            color = if (health.ready) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.error,
+        )
+        health.items.forEachIndexed { index, item ->
+            if (index > 0) PulsarDivider()
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onAction(item.action) },
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Icon(
+                        imageVector = if (item.needsAttention) {
+                            Icons.Outlined.ErrorOutline
+                        } else {
+                            Icons.Outlined.CheckCircle
+                        },
+                        contentDescription = null,
+                        tint = if (item.needsAttention) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.primary
+                        },
+                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = item.title,
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                        Text(
+                            text = item.status,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (item.needsAttention) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
+                }
+                if (item.needsAttention) {
+                    Text(
+                        text = item.detail,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 36.dp),
+                    )
+                }
+            }
+        }
+        if (!health.ready) {
+            Text(
+                text = "Tap an item to open the setting that fixes it.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

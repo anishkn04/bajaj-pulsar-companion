@@ -1,9 +1,5 @@
 package dev.pulsarconnect.app.ui
 
-import android.Manifest
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -27,7 +23,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import dev.pulsarconnect.app.ble.BleUiState
 import dev.pulsarconnect.core.data.LocalBackup
 import dev.pulsarconnect.core.data.LocalBackupCodec
@@ -51,10 +46,7 @@ internal fun SettingsScreen(
     onOpenBatteryOptimization: () -> Unit,
 ) {
     val context = LocalContext.current
-    val notificationGranted = ContextCompat.checkSelfPermission(
-        context,
-        Manifest.permission.POST_NOTIFICATIONS,
-    ) == PackageManager.PERMISSION_GRANTED
+    val notificationGranted = notificationPermissionGranted(context)
 
     var redactVin by rememberSaveable { mutableStateOf(false) }
     var redactForPendingExport by remember { mutableStateOf(false) }
@@ -143,14 +135,7 @@ internal fun SettingsScreen(
                 message = "The foreground service still runs, but you won't see its notification. " +
                     "Grant it to keep the stop control visible.",
                 actionLabel = "Grant notification permission",
-                onAction = {
-                    val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
-                        putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-                    }
-                    if (intent.resolveActivity(context.packageManager) != null) {
-                        context.startActivity(intent)
-                    }
-                },
+                onAction = { openAppNotificationSettings(context) },
             )
         }
 

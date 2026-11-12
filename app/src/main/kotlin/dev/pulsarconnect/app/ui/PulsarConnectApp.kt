@@ -1,9 +1,5 @@
 package dev.pulsarconnect.app.ui
 
-import android.content.Intent
-import android.net.Uri
-import android.os.Build
-import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -50,7 +46,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.pulsarconnect.app.ble.BleUiState
 import dev.pulsarconnect.app.ble.BleViewModel
-import dev.pulsarconnect.app.ble.NotificationAccess
 import dev.pulsarconnect.core.ble.BleFailure
 import dev.pulsarconnect.core.ble.ConnectionState
 import dev.pulsarconnect.core.data.isDue
@@ -117,7 +112,10 @@ private fun SignedInScreen(
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_START -> bleViewModel.onForeground()
-                Lifecycle.Event.ON_RESUME -> bleViewModel.refreshNotificationAccess()
+                Lifecycle.Event.ON_RESUME -> {
+                    bleViewModel.refreshPlatformState()
+                    bleViewModel.refreshNotificationAccess()
+                }
                 Lifecycle.Event.ON_STOP -> bleViewModel.onBackground()
                 else -> Unit
             }
@@ -225,7 +223,7 @@ private fun SignedInScreen(
                     onCallerNameChange = bleViewModel::setMirrorCallerName,
                     onMissedCallChange = bleViewModel::setMirrorMissedCalls,
                     onOpenNotificationSettings = {
-                        runCatching { context.startActivity(NotificationAccess.settingsIntent()) }
+                        openNotificationAccessSettings(context)
                     },
                     onRefresh = bleViewModel::onPermissionsChanged,
                     onClearError = bleViewModel::clearError,
@@ -241,17 +239,7 @@ private fun SignedInScreen(
                     onRestoreBackup = viewModel::restoreBackup,
                     onReportError = viewModel::reportError,
                     onOpenBatteryOptimization = {
-                        val intent = Intent().apply {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                action = Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS
-                            } else {
-                                action = Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
-                                data = Uri.parse("package:${context.packageName}")
-                            }
-                        }
-                        if (intent.resolveActivity(context.packageManager) != null) {
-                            context.startActivity(intent)
-                        }
+                        openBatteryOptimizationSettings(context)
                     },
                 )
                 else -> HomeScreen(
@@ -261,6 +249,7 @@ private fun SignedInScreen(
                     onTrips = { navDestination = NavDestination.TRIPS },
                     onReminders = { navDestination = NavDestination.REMINDERS },
                     onBike = { navDestination = NavDestination.BIKE },
+                    onSettings = { navDestination = NavDestination.SETTINGS },
                     onClearError = viewModel::clearError,
                     onRetry = viewModel::retryLocalRecords,
                 )
