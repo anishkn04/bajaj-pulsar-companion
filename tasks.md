@@ -108,7 +108,7 @@ already riding. Make health and failures visible without opening the app.
 
 ## P3 — Everyday quality of life
 
-- [ ] **PC-15 — Reminder notification actions.**
+- [x] **PC-15 — Reminder notification actions.** (`c953ec1`)
   Add "Mark done" and "Snooze" actions to reminder notifications. Acceptance: actions work when
   the app is not running and do not duplicate delivery records.
 
