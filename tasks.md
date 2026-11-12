@@ -87,7 +87,7 @@ already riding. Make health and failures visible without opening the app.
   count of items needing attention, with the existing deep links. Acceptance: each item's
   state is derived from the real setting, not a cached guess.
 
-- [ ] **PC-11 — Richer service notification.**
+- [x] **PC-11 — Richer service notification.** (`3d1d639`)
   Show bike display name and current link state, and add a "Pause mirroring" action next to
   Stop. Acceptance: action updates persisted mirroring intent; notification text never includes
   a VIN or MAC.
