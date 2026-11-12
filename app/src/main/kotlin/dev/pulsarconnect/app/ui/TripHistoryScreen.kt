@@ -1,5 +1,7 @@
 package dev.pulsarconnect.app.ui
 
+import android.content.Context
+import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,6 +16,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -31,9 +34,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import dev.pulsarconnect.core.data.tripShareText
 import dev.pulsarconnect.core.model.Trip
 import java.text.NumberFormat
 import java.time.Duration
@@ -179,6 +184,7 @@ private fun TripRecordCard(
     onDelete: () -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
+    val context = LocalContext.current
     PulsarCard {
         Row(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -206,6 +212,9 @@ private fun TripRecordCard(
                 text = trip.distanceKm?.let { "${formatRecordNumber(it)} km" } ?: "No distance",
                 tone = if (trip.distanceKm != null) StatusTone.Active else StatusTone.Neutral,
             )
+            IconButton(onClick = { shareTrip(context, trip) }) {
+                Icon(Icons.Outlined.Share, contentDescription = "Share trip")
+            }
             Box {
                 IconButton(onClick = { menuOpen = true }) {
                     Icon(Icons.Outlined.MoreVert, contentDescription = "Trip actions")
@@ -249,15 +258,59 @@ private fun TripRecordCard(
                 modifier = Modifier.weight(1f),
             )
             MetricBlock(
+                label = "Average speed",
+                value = trip.avgSpeedKmph?.let { "${formatRecordNumber(it)} km/h" } ?: "—",
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            MetricBlock(
+                label = "Maximum speed",
+                value = trip.maxSpeedKmph?.let { "${formatRecordNumber(it)} km/h" } ?: "—",
+                modifier = Modifier.weight(1f),
+            )
+            MetricBlock(
                 label = "Source",
                 value = "Manual record",
                 modifier = Modifier.weight(1f),
             )
         }
+        if (trip.startLat != null || trip.endLat != null) {
+            PulsarDivider()
+            RouteRow("Start location", trip.startLat, trip.startLon)
+            RouteRow("End location", trip.endLat, trip.endLon)
+        }
         Text(
             "This phone only · no cloud sync",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+private fun shareTrip(context: Context, trip: Trip) {
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_SUBJECT, "Pulsar Connect trip")
+        putExtra(Intent.EXTRA_TEXT, tripShareText(trip, ZoneId.systemDefault()))
+    }
+    context.startActivity(Intent.createChooser(intent, "Share trip"))
+}
+
+@Composable
+private fun RouteRow(label: String, lat: Double?, lon: Double?) {
+    if (lat == null || lon == null) return
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            String.format(Locale.ROOT, "%.5f, %.5f", lat, lon),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
         )
     }
 }
