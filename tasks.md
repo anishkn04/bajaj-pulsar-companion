@@ -112,7 +112,7 @@ already riding. Make health and failures visible without opening the app.
   Add "Mark done" and "Snooze" actions to reminder notifications. Acceptance: actions work when
   the app is not running and do not duplicate delivery records.
 
-- [ ] **PC-16 — Trip detail and share.**
+- [x] **PC-16 — Trip detail and share.** (`3cf6939`)
   Show average speed (already stored but not displayed), duration, coordinates, and a
   share-as-text / optional maps link. Acceptance: share text contains no VIN or MAC.
 
