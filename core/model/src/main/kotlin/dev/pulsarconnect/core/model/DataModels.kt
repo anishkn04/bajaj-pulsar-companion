@@ -46,6 +46,8 @@ data class ServiceReminder(
     val description: String?,
     val dueOdometerKm: Double?,
     val dueDateMillis: Long?,
+    val repeatEveryKm: Double? = null,
+    val repeatEveryDays: Long? = null,
     val completed: Boolean = false,
     val completedAtMillis: Long? = null,
     val createdAtMillis: Long,

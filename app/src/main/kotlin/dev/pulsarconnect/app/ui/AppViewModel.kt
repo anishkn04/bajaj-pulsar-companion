@@ -212,16 +212,25 @@ class AppViewModel(
         if (current.lastDeletedTrip != null) _state.value = current.copy(lastDeletedTrip = null)
     }
 
-    fun addReminder(title: String, odometerInput: String, dateInput: String) = localAction { current ->
+    fun addReminder(
+        title: String,
+        odometerInput: String,
+        dateInput: String,
+        repeatKmInput: String = "",
+        repeatDaysInput: String = "",
+    ) = localAction { current ->
         val cleanTitle = parseReminderTitle(title)
         val odometer = parseOptionalOdometer(odometerInput)
         val date = parseOptionalDate(dateInput)
-        require(odometer != null || date != null) { "Enter a due odometer or date (or both)." }
-        ensureBike(current.vin)
-        reminders.addReminder(ServiceReminder(
+        val reminder = ServiceReminder(
             vin = current.vin, title = cleanTitle, description = null,
-            dueOdometerKm = odometer, dueDateMillis = date, createdAtMillis = clock(),
-        ))
+            dueOdometerKm = odometer, dueDateMillis = date,
+            repeatEveryKm = parseOptionalRepeatDistance(repeatKmInput),
+            repeatEveryDays = parseOptionalRepeatDays(repeatDaysInput),
+            createdAtMillis = clock(),
+        ).also(::requireValidReminder)
+        ensureBike(current.vin)
+        reminders.addReminder(reminder)
     }
 
     fun updateReminder(
@@ -230,6 +239,8 @@ class AppViewModel(
         descriptionInput: String,
         odometerInput: String,
         dateInput: String,
+        repeatKmInput: String = "",
+        repeatDaysInput: String = "",
     ) = localAction { current ->
         val existing = requireNotNull(current.reminders.firstOrNull { it.id == id }) {
             "That reminder is no longer available."
@@ -239,6 +250,8 @@ class AppViewModel(
             description = descriptionInput.trim().takeIf(String::isNotEmpty),
             dueOdometerKm = parseOptionalOdometer(odometerInput),
             dueDateMillis = parseOptionalDate(dateInput),
+            repeatEveryKm = parseOptionalRepeatDistance(repeatKmInput),
+            repeatEveryDays = parseOptionalRepeatDays(repeatDaysInput),
         ).also(::requireValidReminder)
         reminders.updateReminder(updated)
         if (existing.dueOdometerKm != updated.dueOdometerKm ||
@@ -501,6 +514,22 @@ class AppViewModel(
             } catch (_: java.time.DateTimeException) {
                 throw IllegalArgumentException("Enter a valid date as YYYY-MM-DD.")
             }
+        }
+
+    private fun parseOptionalRepeatDistance(input: String): Double? =
+        input.trim().takeIf(String::isNotEmpty)?.let {
+            val value = it.toDoubleOrNull()
+            require(value != null && value.isFinite() && value > 0) {
+                "Enter a repeat distance greater than 0 km."
+            }
+            value
+        }
+
+    private fun parseOptionalRepeatDays(input: String): Long? =
+        input.trim().takeIf(String::isNotEmpty)?.let {
+            val value = it.toLongOrNull()
+            require(value != null && value > 0) { "Enter a repeat interval of at least one day." }
+            value
         }
 
     companion object {

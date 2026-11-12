@@ -110,6 +110,45 @@ class DatabaseRegressionTest {
     }
 
     @Test
+    fun `existing reminder tables gain repeat columns in place`() = runTest {
+        val legacyFile = java.io.File.createTempFile("legacy_", ".db").apply { delete() }
+        java.sql.DriverManager.getConnection("jdbc:sqlite:${legacyFile.absolutePath}").use { conn ->
+            conn.createStatement().use { statement ->
+                statement.executeUpdate("""
+                    CREATE TABLE service_reminder (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        vin TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        description TEXT,
+                        due_odometer_km REAL,
+                        due_date_millis INTEGER,
+                        completed INTEGER NOT NULL DEFAULT 0,
+                        completed_at_millis INTEGER,
+                        created_at_millis INTEGER NOT NULL
+                    )
+                """.trimIndent())
+            }
+        }
+        try {
+            Database.create(legacyFile.absolutePath).use { migrated ->
+                migrated.upsertBike(bike())
+                val id = migrated.insertReminder(
+                    ServiceReminder(
+                        vin = "VIN", title = "Service", description = null,
+                        dueOdometerKm = 100.0, dueDateMillis = null,
+                        repeatEveryKm = 50.0, createdAtMillis = 0,
+                    ),
+                )
+                val saved = migrated.getReminder(id)!!
+                assertEquals(50.0, saved.repeatEveryKm)
+                assertNull(saved.repeatEveryDays)
+            }
+        } finally {
+            legacyFile.delete()
+        }
+    }
+
+    @Test
     fun `foreign keys reject orphan trips reminders and telemetry and cascade trip deletion`() = runTest {
         assertThrows(SQLException::class.java) { runBlocking { db.insertTrip(trip()) } }
         assertThrows(SQLException::class.java) {

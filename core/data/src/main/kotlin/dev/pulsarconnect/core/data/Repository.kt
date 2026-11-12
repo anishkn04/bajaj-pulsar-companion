@@ -193,7 +193,14 @@ class InMemoryReminderRepository : ReminderRepository {
         .toList()
 
     override suspend fun completeReminder(id: Long, atMillis: Long): Unit = mutex.withLock {
-        reminders[id]?.let { reminders[id] = it.copy(completed = true, completedAtMillis = atMillis) }
+        val stored = reminders[id] ?: return@withLock
+        if (stored.completed) return@withLock
+        reminders[id] = stored.copy(completed = true, completedAtMillis = atMillis)
+        stored.nextOccurrence(atMillis)?.let { next ->
+            val withId = next.copy(id = nextId)
+            nextId++
+            reminders[withId.id!!] = withId
+        }
     }
 
     override suspend fun getDueReminders(vin: String, currentOdometer: Double, currentTimeMillis: Long): List<ServiceReminder> = reminders.values

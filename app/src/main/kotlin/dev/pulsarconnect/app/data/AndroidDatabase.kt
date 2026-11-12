@@ -10,6 +10,7 @@ import dev.pulsarconnect.core.data.ReminderRepository
 import dev.pulsarconnect.core.data.TripRepository
 import dev.pulsarconnect.core.data.correctedOdometer
 import dev.pulsarconnect.core.data.isDue
+import dev.pulsarconnect.core.data.nextOccurrence
 import dev.pulsarconnect.core.data.requireValidOdometer
 import dev.pulsarconnect.core.data.requireValidReminder
 import dev.pulsarconnect.core.model.BikeProfile
@@ -152,6 +153,7 @@ class AndroidDatabase(
                 val id = insertOrThrow("service_reminder", null, values(
                     "vin" to reminder.vin, "title" to reminder.title, "description" to reminder.description,
                     "due_odometer_km" to reminder.dueOdometerKm, "due_date_millis" to reminder.dueDateMillis,
+                    "repeat_every_km" to reminder.repeatEveryKm, "repeat_every_days" to reminder.repeatEveryDays,
                     "completed" to reminder.completed, "completed_at_millis" to reminder.completedAtMillis,
                     "created_at_millis" to reminder.createdAtMillis,
                 ))
@@ -162,8 +164,19 @@ class AndroidDatabase(
         override suspend fun getReminders(vin: String): List<ServiceReminder> = access { it.findReminders(vin) }
 
         override suspend fun completeReminder(id: Long, atMillis: Long): Unit = access { db ->
-            db.update("service_reminder", values("completed" to true, "completed_at_millis" to atMillis), "id = ?", arrayOf(id.toString()))
-            Unit
+            db.transaction {
+                val stored = findReminder(id) ?: return@transaction Unit
+                if (stored.completed) return@transaction Unit
+                update(
+                    "service_reminder",
+                    values("completed" to true, "completed_at_millis" to atMillis),
+                    "id = ?",
+                    arrayOf(id.toString()),
+                )
+                // Recurring reminders get exactly one next occurrence; repeats are idempotent above.
+                stored.nextOccurrence(atMillis)?.let { insertOrThrow("service_reminder", null, it.values()) }
+                Unit
+            }
         }
 
         override suspend fun getDueReminders(vin: String, currentOdometer: Double, currentTimeMillis: Long): List<ServiceReminder> = access { db ->
@@ -246,7 +259,7 @@ class AndroidDatabase(
         }
     }
 
-    private class Helper(context: Context, name: String) : SQLiteOpenHelper(context, name, null, 1) {
+    private class Helper(context: Context, name: String) : SQLiteOpenHelper(context, name, null, 2) {
         init {
             setWriteAheadLoggingEnabled(true)
         }
@@ -291,6 +304,7 @@ class AndroidDatabase(
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     vin TEXT NOT NULL REFERENCES bike_profile(vin),
                     title TEXT NOT NULL, description TEXT, due_odometer_km REAL, due_date_millis INTEGER,
+                    repeat_every_km REAL, repeat_every_days INTEGER,
                     completed INTEGER NOT NULL DEFAULT 0, completed_at_millis INTEGER,
                     created_at_millis INTEGER NOT NULL
                 )
@@ -299,7 +313,14 @@ class AndroidDatabase(
         }
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-            error("No migration from schema $oldVersion to $newVersion")
+            var version = oldVersion
+            if (version < 2) {
+                // Existing v1 reminders keep their rows and simply have no repeat interval.
+                db.execSQL("ALTER TABLE service_reminder ADD COLUMN repeat_every_km REAL")
+                db.execSQL("ALTER TABLE service_reminder ADD COLUMN repeat_every_days INTEGER")
+                version = 2
+            }
+            check(version == newVersion) { "No migration from schema $oldVersion to $newVersion" }
         }
     }
 }
@@ -343,6 +364,7 @@ private fun SQLiteDatabase.findReminder(id: Long): ServiceReminder? = query(
 private fun ServiceReminder.values(): ContentValues = values(
     "vin" to vin, "title" to title, "description" to description,
     "due_odometer_km" to dueOdometerKm, "due_date_millis" to dueDateMillis,
+    "repeat_every_km" to repeatEveryKm, "repeat_every_days" to repeatEveryDays,
     "completed" to completed, "completed_at_millis" to completedAtMillis,
     "created_at_millis" to createdAtMillis,
 )
@@ -393,6 +415,7 @@ private fun Cursor.telemetry(): TelemetryPoint = TelemetryPoint(
 private fun Cursor.reminder(): ServiceReminder = ServiceReminder(
     id = long("id"), vin = string("vin"), title = string("title"), description = nullableString("description"),
     dueOdometerKm = nullableDouble("due_odometer_km"), dueDateMillis = nullableLong("due_date_millis"),
+    repeatEveryKm = nullableDouble("repeat_every_km"), repeatEveryDays = nullableLong("repeat_every_days"),
     completed = long("completed") != 0L, completedAtMillis = nullableLong("completed_at_millis"), createdAtMillis = long("created_at_millis"),
 )
 

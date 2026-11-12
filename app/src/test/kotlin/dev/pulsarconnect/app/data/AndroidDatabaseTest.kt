@@ -296,6 +296,77 @@ class AndroidDatabaseTest {
         rejects { db.reminders.restoreReminder(saved) }
     }
 
+    @Test fun completingARecurringReminderAddsExactlyOneNextOccurrence() = runBlocking {
+        val saved = db.reminders.addReminder(reminder(odometer = 100.0).copy(repeatEveryKm = 50.0))
+
+        db.reminders.completeReminder(saved.id!!, 5_000)
+
+        val all = db.reminders.getReminders(bike.vin)
+        assertEquals(2, all.size)
+        val next = all.single { !it.completed }
+        assertEquals(150.0, next.dueOdometerKm!!, 0.0)
+        assertEquals(50.0, next.repeatEveryKm!!, 0.0)
+        assertNull(next.completedAtMillis)
+
+        db.reminders.completeReminder(saved.id!!, 6_000)
+        assertEquals(2, db.reminders.getReminders(bike.vin).size)
+
+        reopen()
+        assertEquals(2, db.reminders.getReminders(bike.vin).size)
+        assertEquals(150.0, db.reminders.getReminders(bike.vin).single { !it.completed }.dueOdometerKm!!, 0.0)
+    }
+
+    @Test fun schemaOneRemindersGainRepeatColumnsWithoutLosingRows() = runBlocking {
+        db.close()
+        context.deleteDatabase(name)
+        val legacy = object : android.database.sqlite.SQLiteOpenHelper(context, name, null, 1) {
+            init {
+                setWriteAheadLoggingEnabled(true)
+            }
+
+            override fun onCreate(legacyDb: SQLiteDatabase) {
+                legacyDb.execSQL(
+                    "CREATE TABLE bike_profile (vin TEXT PRIMARY KEY NOT NULL, model TEXT, " +
+                        "model_image_url TEXT, nickname TEXT, purchase_date_millis INTEGER, last_synced_at_millis INTEGER)",
+                )
+                legacyDb.execSQL(
+                    "CREATE TABLE service_reminder (id INTEGER PRIMARY KEY AUTOINCREMENT, " +
+                        "vin TEXT NOT NULL REFERENCES bike_profile(vin), title TEXT NOT NULL, description TEXT, " +
+                        "due_odometer_km REAL, due_date_millis INTEGER, completed INTEGER NOT NULL DEFAULT 0, " +
+                        "completed_at_millis INTEGER, created_at_millis INTEGER NOT NULL)",
+                )
+                legacyDb.execSQL("INSERT INTO bike_profile (vin) VALUES (?)", arrayOf(bike.vin))
+                legacyDb.execSQL(
+                    "INSERT INTO service_reminder (vin, title, due_odometer_km, created_at_millis) VALUES (?, ?, ?, ?)",
+                    arrayOf(bike.vin, "Legacy service", 100.0, 0),
+                )
+            }
+
+            override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) =
+                error("Test helper only creates schema 1")
+        }
+        legacy.writableDatabase
+        legacy.close()
+
+        db = AndroidDatabase(context, name) { now }
+        // Opening the helper upgrades the schema. Robolectric's API 26 connection pool then caches
+        // the pre-upgrade schema, so a fresh connection makes the added columns visible.
+        db.bikes.getBike("DEV-MISSING")
+        context.openOrCreateDatabase(name, Context.MODE_PRIVATE, null).close()
+
+        val legacyReminder = db.reminders.getReminders(bike.vin).single()
+        assertEquals("Legacy service", legacyReminder.title)
+        assertEquals(100.0, legacyReminder.dueOdometerKm!!, 0.0)
+        assertNull(legacyReminder.repeatEveryKm)
+        assertNull(legacyReminder.repeatEveryDays)
+
+        val recurring = db.reminders.addReminder(reminder(odometer = 200.0).copy(repeatEveryDays = 30))
+        val stored = db.reminders.getReminders(bike.vin).single { it.id == recurring.id }
+        assertEquals(30L, stored.repeatEveryDays)
+        reopen()
+        assertEquals(30L, db.reminders.getReminders(bike.vin).single { it.id == recurring.id }.repeatEveryDays)
+    }
+
     @Test fun bikeUpsertPreservesChildrenAndNullableProfileFields() = runBlocking {
         val trip = db.trips.startTrip(bike.vin, 0.0, null, null)
         db.trips.addTelemetry(trip.id!!, point())

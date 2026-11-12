@@ -101,6 +101,65 @@ class ReminderRepairTest {
     }
 
     @Test
+    fun `completing a recurring reminder creates exactly one next occurrence`() = runTest {
+        val date = Instant.parse("2026-11-01T00:00:00Z").toEpochMilli()
+        val original = reminders.addReminder(
+            ServiceReminder(
+                vin = "DEV-BIKE-A", title = "Service", description = null,
+                dueOdometerKm = 1_000.0, dueDateMillis = date,
+                repeatEveryKm = 500.0, repeatEveryDays = 30, createdAtMillis = 0,
+            ),
+        )
+
+        reminders.completeReminder(original.id!!, 10_000)
+
+        val all = reminders.getReminders("DEV-BIKE-A")
+        assertEquals(2, all.size)
+        val completed = all.single { it.id == original.id }
+        assertTrue(completed.completed)
+        assertEquals(10_000L, completed.completedAtMillis)
+        val next = all.single { it.id != original.id }
+        assertEquals(1_500.0, next.dueOdometerKm)
+        assertEquals(date + 30L * 86_400_000, next.dueDateMillis)
+        assertEquals(500.0, next.repeatEveryKm)
+        assertEquals(30L, next.repeatEveryDays)
+        assertFalse(next.completed)
+        assertNull(next.completedAtMillis)
+
+        // Retrying completion must not add another occurrence.
+        reminders.completeReminder(original.id!!, 11_000)
+        assertEquals(2, reminders.getReminders("DEV-BIKE-A").size)
+
+        // Completing the next occurrence advances once, rather than looping.
+        reminders.completeReminder(next.id!!, 12_000)
+        val advanced = reminders.getReminders("DEV-BIKE-A").single { !it.completed }
+        assertEquals(2_000.0, advanced.dueOdometerKm)
+        assertEquals(date + 60L * 86_400_000, advanced.dueDateMillis)
+    }
+
+    @Test
+    fun `a one-off reminder does not create a next occurrence`() = runTest {
+        val original = reminder(odometer = 1_000.0)
+        reminders.completeReminder(original.id!!, 10_000)
+        assertEquals(listOf(original.copy(completed = true, completedAtMillis = 10_000)), reminders.getReminders("DEV-BIKE-A"))
+    }
+
+    @Test
+    fun `recurring reminders require a matching due threshold and positive intervals`() = runTest {
+        val original = reminder()
+        for (invalid in listOf(
+            original.copy(dueOdometerKm = null, repeatEveryKm = 500.0),
+            original.copy(repeatEveryKm = 0.0),
+            original.copy(repeatEveryKm = Double.NaN),
+            original.copy(repeatEveryDays = 0),
+            original.copy(repeatEveryDays = 30),
+        )) {
+            rejects { reminders.updateReminder(invalid) }
+        }
+        assertEquals(original, reminders.getReminders("DEV-BIKE-A").single())
+    }
+
+    @Test
     fun `snoozing shifts only the thresholds that exist and keeps completion state`() {
         val zone = ZoneOffset.UTC
         val date = Instant.parse("2026-11-01T00:00:00Z").toEpochMilli()

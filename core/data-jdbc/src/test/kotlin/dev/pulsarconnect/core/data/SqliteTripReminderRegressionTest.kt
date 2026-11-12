@@ -266,6 +266,27 @@ class SqliteTripReminderRegressionTest {
     }
 
     @Test
+    fun `completing a recurring reminder inserts exactly one next occurrence`() = runTest {
+        val saved = reminders.addReminder(reminder(null, 1_000.0).copy(repeatEveryKm = 500.0))
+
+        reminders.completeReminder(saved.id!!, 10_000)
+
+        val all = reminders.getReminders("VIN")
+        assertEquals(2, all.size)
+        val next = all.single { !it.completed }
+        assertEquals(1_500.0, next.dueOdometerKm)
+        assertEquals(500.0, next.repeatEveryKm)
+        assertNull(next.dueDateMillis)
+        assertNull(next.completedAtMillis)
+
+        reminders.completeReminder(saved.id!!, 11_000)
+        assertEquals(2, reminders.getReminders("VIN").size)
+
+        reminders.completeReminder(next.id!!, 12_000)
+        assertEquals(2_000.0, reminders.getReminders("VIN").single { !it.completed }.dueOdometerKm)
+    }
+
+    @Test
     fun `editing a reminder replaces rider fields and persists completion`() = runTest {
         val saved = reminders.addReminder(reminder(10_000, 500.0))
         reminders.completeReminder(saved.id!!, 12_000)

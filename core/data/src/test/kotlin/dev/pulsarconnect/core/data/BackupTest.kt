@@ -91,15 +91,29 @@ class BackupTest {
 
         val newer = assertThrows(IllegalArgumentException::class.java) {
             LocalBackupCodec.decode(
-                encoded.replace("\"schemaVersion\": 1", "\"schemaVersion\": 2, \"futureField\": true"),
+                encoded.replace("\"schemaVersion\": 2", "\"schemaVersion\": 3, \"futureField\": true"),
             )
         }
         assertTrue(newer.message!!.contains("newer app version"))
 
         val older = assertThrows(IllegalArgumentException::class.java) {
-            LocalBackupCodec.decode(encoded.replace("\"schemaVersion\": 1", "\"schemaVersion\": 0"))
+            LocalBackupCodec.decode(encoded.replace("\"schemaVersion\": 2", "\"schemaVersion\": 0"))
         }
         assertTrue(older.message!!.contains("unsupported schema version"))
+    }
+
+    @Test
+    fun `a version 1 backup without repeat fields still decodes`() = runTest {
+        val store = newStore()
+        val encoded = LocalBackupCodec.encode(store.seed())
+            .replace("\"schemaVersion\": 2", "\"schemaVersion\": 1")
+
+        val decoded = LocalBackupCodec.decode(encoded)
+
+        assertEquals(1, decoded.schemaVersion)
+        assertEquals(1, decoded.reminders.size)
+        assertNull(decoded.reminders.single().repeatEveryKm)
+        assertNull(decoded.reminders.single().repeatEveryDays)
     }
 
     @Test

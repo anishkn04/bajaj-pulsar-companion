@@ -12,7 +12,10 @@ import kotlinx.serialization.json.Json
 /** Placeholder written instead of a VIN when the rider redacts identifying data. */
 const val REDACTED_VIN = "REDACTED-VIN"
 
-const val BACKUP_SCHEMA_VERSION = 1
+const val BACKUP_SCHEMA_VERSION = 2
+
+/** Oldest backup this app can still import. v1 predates recurring reminder fields. */
+const val MIN_BACKUP_SCHEMA_VERSION = 1
 
 enum class RestoreMode { MERGE, REPLACE }
 
@@ -61,7 +64,7 @@ object LocalBackupCodec {
             throw IllegalArgumentException("That file is not a valid Pulsar Connect backup.", error)
         }
         when {
-            backup.schemaVersion == BACKUP_SCHEMA_VERSION -> Unit
+            backup.schemaVersion in MIN_BACKUP_SCHEMA_VERSION..BACKUP_SCHEMA_VERSION -> Unit
             backup.schemaVersion > BACKUP_SCHEMA_VERSION ->
                 throw IllegalArgumentException("This backup was made by a newer app version. Update Pulsar Connect before restoring it.")
             else ->

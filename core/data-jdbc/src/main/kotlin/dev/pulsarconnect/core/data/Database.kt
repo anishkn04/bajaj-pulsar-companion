@@ -111,16 +111,32 @@ class Database private constructor(
                     description TEXT,
                     due_odometer_km REAL,
                     due_date_millis INTEGER,
+                    repeat_every_km REAL,
+                    repeat_every_days INTEGER,
                     completed INTEGER NOT NULL DEFAULT 0,
                     completed_at_millis INTEGER,
                     created_at_millis INTEGER NOT NULL,
                     FOREIGN KEY (vin) REFERENCES bike_profile(vin)
                 )
             """.trimIndent())
+            // Existing files predate the repeat columns, so add them in place.
+            ensureColumn(conn, "service_reminder", "repeat_every_km", "REAL")
+            ensureColumn(conn, "service_reminder", "repeat_every_days", "INTEGER")
             conn.createStatement().executeUpdate("""
                 CREATE INDEX IF NOT EXISTS idx_reminder_vin_due ON service_reminder(vin, due_odometer_km, due_date_millis)
             """.trimIndent())
             conn.commit()
+        }
+    }
+
+    private fun ensureColumn(conn: java.sql.Connection, table: String, column: String, type: String) {
+        val exists = conn.createStatement().executeQuery("PRAGMA table_info($table)").use { rs ->
+            var found = false
+            while (rs.next()) if (rs.getString("name") == column) found = true
+            found
+        }
+        if (!exists) {
+            conn.createStatement().executeUpdate("ALTER TABLE $table ADD COLUMN $column $type")
         }
     }
 
@@ -383,22 +399,7 @@ class Database private constructor(
     suspend fun insertReminder(reminder: ServiceReminder): Long = withContext(Dispatchers.IO) {
         dataSource.connection.use { conn ->
             conn.setAutoCommit(false)
-            val stmt = conn.prepareStatement("""
-                INSERT INTO service_reminder (vin, title, description, due_odometer_km, due_date_millis,
-                                              completed, completed_at_millis, created_at_millis)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """.trimIndent(), java.sql.Statement.RETURN_GENERATED_KEYS)
-            stmt.setString(1, reminder.vin)
-            stmt.setString(2, reminder.title)
-            stmt.setString(3, reminder.description)
-            stmt.setObject(4, reminder.dueOdometerKm)
-            stmt.setObject(5, reminder.dueDateMillis)
-            stmt.setInt(6, if (reminder.completed) 1 else 0)
-            stmt.setObject(7, reminder.completedAtMillis)
-            stmt.setLong(8, reminder.createdAtMillis)
-            stmt.executeUpdate()
-            val keys = stmt.generatedKeys
-            val id = if (keys.next()) keys.getLong(1) else -1
+            val id = insertReminderRow(conn, reminder)
             conn.commit()
             id
         }
@@ -409,24 +410,75 @@ class Database private constructor(
         val id = requireNotNull(reminder.id) { "Reminder must have an ID" }
         dataSource.connection.use { conn ->
             conn.setAutoCommit(false)
-            val stmt = conn.prepareStatement("""
-                INSERT INTO service_reminder (id, vin, title, description, due_odometer_km, due_date_millis,
-                                              completed, completed_at_millis, created_at_millis)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """.trimIndent())
-            stmt.setLong(1, id)
-            stmt.setString(2, reminder.vin)
-            stmt.setString(3, reminder.title)
-            stmt.setString(4, reminder.description)
-            stmt.setObject(5, reminder.dueOdometerKm)
-            stmt.setObject(6, reminder.dueDateMillis)
-            stmt.setInt(7, if (reminder.completed) 1 else 0)
-            stmt.setObject(8, reminder.completedAtMillis)
-            stmt.setLong(9, reminder.createdAtMillis)
-            stmt.executeUpdate()
+            insertReminderRow(conn, reminder, id)
             conn.commit()
             reminder
         }
+    }
+
+    /**
+     * Marks a reminder complete and, for a recurring reminder, inserts exactly one next occurrence
+     * in the same transaction. Completing an already completed reminder is a no-op, so retries
+     * cannot create a loop of occurrences.
+     */
+    suspend fun completeReminder(id: Long, atMillis: Long): Unit = withContext(Dispatchers.IO) {
+        dataSource.connection.use { conn ->
+            conn.setAutoCommit(false)
+            try {
+                val stored = getReminderRow(conn, id)
+                if (stored != null && !stored.completed) {
+                    val stmt = conn.prepareStatement(
+                        "UPDATE service_reminder SET completed = 1, completed_at_millis = ? WHERE id = ?",
+                    )
+                    stmt.setLong(1, atMillis)
+                    stmt.setLong(2, id)
+                    stmt.executeUpdate()
+                    stored.nextOccurrence(atMillis)?.let { insertReminderRow(conn, it) }
+                }
+                conn.commit()
+            } catch (failure: Exception) {
+                conn.rollback()
+                throw failure
+            }
+        }
+    }
+
+    private fun getReminderRow(conn: java.sql.Connection, id: Long): ServiceReminder? {
+        val stmt = conn.prepareStatement("SELECT * FROM service_reminder WHERE id = ?")
+        stmt.setLong(1, id)
+        return stmt.executeQuery().use { rs -> if (rs.next()) mapReminder(rs) else null }
+    }
+
+    private fun insertReminderRow(
+        conn: java.sql.Connection,
+        reminder: ServiceReminder,
+        id: Long? = null,
+    ): Long {
+        val columns = "vin, title, description, due_odometer_km, due_date_millis, repeat_every_km, " +
+            "repeat_every_days, completed, completed_at_millis, created_at_millis"
+        val placeholders = "?, ?, ?, ?, ?, ?, ?, ?, ?, ?"
+        val sql = if (id == null) {
+            "INSERT INTO service_reminder ($columns) VALUES ($placeholders)"
+        } else {
+            "INSERT INTO service_reminder (id, $columns) VALUES (?, $placeholders)"
+        }
+        val stmt = conn.prepareStatement(sql, java.sql.Statement.RETURN_GENERATED_KEYS)
+        var index = 1
+        if (id != null) stmt.setLong(index++, id)
+        stmt.setString(index++, reminder.vin)
+        stmt.setString(index++, reminder.title)
+        stmt.setString(index++, reminder.description)
+        stmt.setObject(index++, reminder.dueOdometerKm)
+        stmt.setObject(index++, reminder.dueDateMillis)
+        stmt.setObject(index++, reminder.repeatEveryKm)
+        stmt.setObject(index++, reminder.repeatEveryDays)
+        stmt.setInt(index++, if (reminder.completed) 1 else 0)
+        stmt.setObject(index++, reminder.completedAtMillis)
+        stmt.setLong(index, reminder.createdAtMillis)
+        stmt.executeUpdate()
+        if (id != null) return id
+        val keys = stmt.generatedKeys
+        return if (keys.next()) keys.getLong(1) else -1
     }
 
     suspend fun getRemindersForVin(vin: String): List<ServiceReminder> = withContext(Dispatchers.IO) {        dataSource.connection.use { conn ->
@@ -454,6 +506,7 @@ class Database private constructor(
             conn.setAutoCommit(false)
             val stmt = conn.prepareStatement("""
                 UPDATE service_reminder SET title = ?, description = ?, due_odometer_km = ?, due_date_millis = ?,
+                                            repeat_every_km = ?, repeat_every_days = ?,
                                             completed = ?, completed_at_millis = ?
                 WHERE id = ?
             """.trimIndent())
@@ -461,9 +514,11 @@ class Database private constructor(
             stmt.setString(2, reminder.description)
             stmt.setObject(3, reminder.dueOdometerKm)
             stmt.setObject(4, reminder.dueDateMillis)
-            stmt.setInt(5, if (reminder.completed) 1 else 0)
-            stmt.setObject(6, reminder.completedAtMillis)
-            stmt.setLong(7, id)
+            stmt.setObject(5, reminder.repeatEveryKm)
+            stmt.setObject(6, reminder.repeatEveryDays)
+            stmt.setInt(7, if (reminder.completed) 1 else 0)
+            stmt.setObject(8, reminder.completedAtMillis)
+            stmt.setLong(9, id)
             require(stmt.executeUpdate() > 0) { "Reminder must exist before it can be edited" }
             conn.commit()
             reminder
@@ -487,6 +542,8 @@ class Database private constructor(
         description = rs.getString("description"),
         dueOdometerKm = rs.getNullableDouble("due_odometer_km"),
         dueDateMillis = rs.getNullableLong("due_date_millis"),
+        repeatEveryKm = rs.getNullableDouble("repeat_every_km"),
+        repeatEveryDays = rs.getNullableLong("repeat_every_days"),
         completed = rs.getInt("completed") == 1,
         completedAtMillis = rs.getNullableLong("completed_at_millis"),
         createdAtMillis = rs.getLong("created_at_millis"),

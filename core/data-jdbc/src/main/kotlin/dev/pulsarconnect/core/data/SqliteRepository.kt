@@ -104,16 +104,7 @@ class SqliteReminderRepository(private val db: Database) : ReminderRepository {
 
     override suspend fun getReminders(vin: String): List<ServiceReminder> = db.getRemindersForVin(vin)
 
-    override suspend fun completeReminder(id: Long, atMillis: Long): Unit {
-        db.connection.use { conn ->
-            conn.setAutoCommit(false)
-            val stmt = conn.prepareStatement("UPDATE service_reminder SET completed = 1, completed_at_millis = ? WHERE id = ?")
-            stmt.setLong(1, atMillis)
-            stmt.setLong(2, id)
-            stmt.executeUpdate()
-            conn.commit()
-        }
-    }
+    override suspend fun completeReminder(id: Long, atMillis: Long): Unit = db.completeReminder(id, atMillis)
 
     override suspend fun getDueReminders(vin: String, currentOdometer: Double, currentTimeMillis: Long): List<ServiceReminder> {
         val all = db.getRemindersForVin(vin)

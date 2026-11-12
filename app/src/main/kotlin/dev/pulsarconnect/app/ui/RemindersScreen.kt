@@ -45,8 +45,8 @@ import kotlinx.coroutines.delay
 @Composable
 internal fun RemindersScreen(
     state: UiState.SignedIn,
-    onAddReminder: (String, String, String) -> Unit,
-    onEditReminder: (Long, String, String, String, String) -> Unit,
+    onAddReminder: (String, String, String, String, String) -> Unit,
+    onEditReminder: (Long, String, String, String, String, String, String) -> Unit,
     onDeleteReminder: (Long) -> Unit,
     onSnoozeReminder: (Long, Long, Double) -> Unit,
     onReopenReminder: (Long) -> Unit,
@@ -59,6 +59,8 @@ internal fun RemindersScreen(
     var title by rememberSaveable(state.vin) { mutableStateOf("") }
     var odometer by rememberSaveable(state.vin) { mutableStateOf("") }
     var date by rememberSaveable(state.vin) { mutableStateOf("") }
+    var repeatKm by rememberSaveable(state.vin) { mutableStateOf("") }
+    var repeatDays by rememberSaveable(state.vin) { mutableStateOf("") }
     var submittedCount by rememberSaveable(state.vin) { mutableStateOf<Int?>(null) }
     var editingReminder by remember { mutableStateOf<ServiceReminder?>(null) }
     var deletingReminder by remember { mutableStateOf<ServiceReminder?>(null) }
@@ -69,6 +71,8 @@ internal fun RemindersScreen(
                 title = ""
                 odometer = ""
                 date = ""
+                repeatKm = ""
+                repeatDays = ""
                 submittedCount = null
             }
         }
@@ -149,9 +153,34 @@ internal fun RemindersScreen(
                     modifier = Modifier.fillMaxWidth(),
                     shape = MaterialTheme.shapes.medium,
                 )
+                OutlinedTextField(
+                    value = repeatKm,
+                    onValueChange = { repeatKm = it },
+                    label = { Text("Repeat every (km, optional)") },
+                    placeholder = { Text("3000.0") },
+                    supportingText = { Text("Needs a due odometer; the next occurrence is created after completion.") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    enabled = enabled,
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.medium,
+                )
+                OutlinedTextField(
+                    value = repeatDays,
+                    onValueChange = { repeatDays = it },
+                    label = { Text("Repeat every (days, optional)") },
+                    placeholder = { Text("180") },
+                    supportingText = { Text("Needs a due date; the next occurrence is created after completion.") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    enabled = enabled,
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.medium,
+                )
                 Text(
                     "Set an odometer, a date, or both. When both are set, the reminder is due " +
-                        "whichever comes first. Odometer checks use your latest recorded reading.",
+                        "whichever comes first. Odometer checks use your latest recorded reading. " +
+                        "Recurring reminders re-arm their next date or distance when marked done.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -159,7 +188,7 @@ internal fun RemindersScreen(
                     label = "Add reminder",
                     onClick = {
                         submittedCount = state.reminders.size
-                        onAddReminder(title, odometer, date)
+                        onAddReminder(title, odometer, date, repeatKm, repeatDays)
                     },
                     enabled = enabled && title.isNotBlank(),
                 )
@@ -207,9 +236,11 @@ internal fun RemindersScreen(
         EditReminderDialog(
             reminder = reminder,
             onDismiss = { editingReminder = null },
-            onConfirm = { newTitle, description, newOdometer, newDate ->
+            onConfirm = { newTitle, description, newOdometer, newDate, newRepeatKm, newRepeatDays ->
                 editingReminder = null
-                reminder.id?.let { onEditReminder(it, newTitle, description, newOdometer, newDate) }
+                reminder.id?.let {
+                    onEditReminder(it, newTitle, description, newOdometer, newDate, newRepeatKm, newRepeatDays)
+                }
             },
         )
     }
@@ -315,6 +346,17 @@ private fun ReminderRecordCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        val repeatLabel = listOfNotNull(
+            reminder.repeatEveryKm?.let { "every ${formatRecordNumber(it)} km" },
+            reminder.repeatEveryDays?.let { if (it == 1L) "every day" else "every $it days" },
+        ).joinToString(" and ")
+        if (repeatLabel.isNotEmpty()) {
+            Text(
+                "Repeats $repeatLabel.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         Text(
             when {
                 reminder.completed -> "Completed"
@@ -373,7 +415,7 @@ private fun ReminderRecordCard(
 private fun EditReminderDialog(
     reminder: ServiceReminder,
     onDismiss: () -> Unit,
-    onConfirm: (String, String, String, String) -> Unit,
+    onConfirm: (String, String, String, String, String, String) -> Unit,
 ) {
     var title by remember(reminder.id) { mutableStateOf(reminder.title) }
     var description by remember(reminder.id) { mutableStateOf(reminder.description.orEmpty()) }
@@ -383,18 +425,34 @@ private fun EditReminderDialog(
     var date by remember(reminder.id) {
         mutableStateOf(reminder.dueDateMillis?.let(::editableDate).orEmpty())
     }
+    var repeatKm by remember(reminder.id) {
+        mutableStateOf(reminder.repeatEveryKm?.let(::editableOdometer).orEmpty())
+    }
+    var repeatDays by remember(reminder.id) {
+        mutableStateOf(reminder.repeatEveryDays?.takeIf { it > 0 }?.toString().orEmpty())
+    }
     var validationError by remember(reminder.id) { mutableStateOf<String?>(null) }
 
     fun submit() {
         val odometerValue = odometer.trim().takeIf(String::isNotEmpty)?.toDoubleOrNull()
+        val repeatKmValue = repeatKm.trim().takeIf(String::isNotEmpty)?.toDoubleOrNull()
+        val repeatDaysValue = repeatDays.trim().takeIf(String::isNotEmpty)?.toLongOrNull()
         validationError = when {
             title.isBlank() -> "Enter a reminder title."
             odometer.isNotBlank() && (odometerValue == null || !odometerValue.isFinite() || odometerValue < 0) ->
                 "Enter a finite, nonnegative odometer reading in km."
+            repeatKm.isNotBlank() && (repeatKmValue == null || !repeatKmValue.isFinite() || repeatKmValue <= 0) ->
+                "Enter a repeat distance greater than 0 km."
+            repeatDays.isNotBlank() && (repeatDaysValue == null || repeatDaysValue <= 0) ->
+                "Enter a repeat interval of at least one day."
+            repeatKm.isNotBlank() && odometer.isBlank() ->
+                "Set a repeat distance only when the reminder has a due odometer."
+            repeatDays.isNotBlank() && date.isBlank() ->
+                "Set a repeat number of days only when the reminder has a due date."
             odometer.isBlank() && date.isBlank() -> "Enter a due odometer or date (or both)."
             else -> null
         }
-        if (validationError == null) onConfirm(title, description, odometer, date)
+        if (validationError == null) onConfirm(title, description, odometer, date, repeatKm, repeatDays)
     }
 
     AlertDialog(
@@ -433,6 +491,24 @@ private fun EditReminderDialog(
                     label = { Text("Due date (optional)") },
                     placeholder = { Text("yyyy-MM-dd") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+                    singleLine = true,
+                    isError = validationError != null,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = repeatKm,
+                    onValueChange = { repeatKm = it },
+                    label = { Text("Repeat every (km, optional)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    isError = validationError != null,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = repeatDays,
+                    onValueChange = { repeatDays = it },
+                    label = { Text("Repeat every (days, optional)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
                     isError = validationError != null,
                     modifier = Modifier.fillMaxWidth(),

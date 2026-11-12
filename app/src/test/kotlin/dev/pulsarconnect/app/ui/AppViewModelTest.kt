@@ -586,4 +586,45 @@ class AppViewModelTest {
         assertNull(signedIn(vm).notice)
         assertFalse(signedIn(vm).busy)
     }
+
+    @Test fun `a recurring reminder saves intervals and completion adds its next occurrence`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.addReminder("Oil", "1000", "2026-12-01", "500", "30")
+        advanceUntilIdle()
+
+        val saved = signedIn(vm).reminders.single()
+        assertEquals(500.0, saved.repeatEveryKm)
+        assertEquals(30L, saved.repeatEveryDays)
+        assertEquals(0L, saved.dueDateMillis!! - Instant.parse("2026-12-01T00:00:00Z").toEpochMilli())
+
+        vm.completeReminder(saved.id!!)
+        advanceUntilIdle()
+
+        val all = signedIn(vm).reminders
+        assertEquals(2, all.size)
+        assertTrue(all.single { it.id == saved.id }.completed)
+        val next = all.single { !it.completed }
+        assertEquals(1_500.0, next.dueOdometerKm)
+        assertEquals(500.0, next.repeatEveryKm)
+        assertEquals(saved.dueDateMillis!! + 30 * 86_400_000L, next.dueDateMillis)
+
+        // Completing the already-completed reminder must not add another occurrence.
+        vm.completeReminder(saved.id!!)
+        advanceUntilIdle()
+        assertEquals(2, signedIn(vm).reminders.size)
+    }
+
+    @Test fun `repeat fields need a matching due threshold`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.addReminder("Oil", "", "", "500", "")
+        advanceUntilIdle()
+
+        assertNotNull(signedIn(vm).error)
+        assertTrue(signedIn(vm).reminders.isEmpty())
+        assertFalse(signedIn(vm).busy)
+    }
 }
