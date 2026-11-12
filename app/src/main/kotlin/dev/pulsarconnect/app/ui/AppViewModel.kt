@@ -161,6 +161,9 @@ class AppViewModel(
         val active = trips.getActiveTrip(vin)
         val page = trips.getTrips(vin, count + 1, 0)
         val savedReminders = reminders.getReminders(vin)
+        val month = monthRange(clock(), zone)
+        val totalDistance = trips.totalDistanceKm(vin)
+        val tripsThisMonth = trips.completedTripsBetween(vin, month.first, month.second)
         val visible = page.take(count)
         updateSignedIn(vin, version) {
             it.copy(
@@ -172,6 +175,8 @@ class AppViewModel(
                 localLoadFailed = false,
                 hasMoreTrips = page.size > count,
                 lastOdometer = active?.startOdometer ?: visible.firstOrNull()?.let { trip -> trip.endOdometer ?: trip.startOdometer },
+                totalDistanceKm = totalDistance,
+                tripsThisMonth = tripsThisMonth,
             )
         }
     }
@@ -586,6 +591,10 @@ sealed interface UiState {
         val error: String? = null,
         val hasMoreTrips: Boolean = false,
         val lastOdometer: Double? = null,
+        /** Local aggregate for the home card; never derived from the paginated [trips] page. */
+        val totalDistanceKm: Double = 0.0,
+        /** Completed trips that started in the current calendar month. */
+        val tripsThisMonth: Int = 0,
         /** Snapshot kept for the Undo snackbar after a delete. Never persisted. */
         val lastDeletedTrip: Trip? = null,
         /** One-shot success message for backups; shown as a snackbar. */

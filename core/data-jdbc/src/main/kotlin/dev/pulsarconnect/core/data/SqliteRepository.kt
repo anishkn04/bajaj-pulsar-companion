@@ -61,6 +61,13 @@ class SqliteTripRepository(
 
     override suspend fun getTrips(vin: String, limit: Int, offset: Int): List<Trip> = db.getTripsForVin(vin, limit, offset)
 
+    override suspend fun totalDistanceKm(vin: String): Double = db.totalDistanceForVin(vin)
+
+    override suspend fun completedTripsBetween(vin: String, fromMillis: Long, toMillis: Long): Int {
+        require(fromMillis <= toMillis) { "Date range must not be reversed" }
+        return db.completedTripsBetweenForVin(vin, fromMillis, toMillis)
+    }
+
     override suspend fun addTelemetry(tripId: Long, point: TelemetryPoint) {
         db.insertTelemetry(point.copy(tripId = tripId))
     }

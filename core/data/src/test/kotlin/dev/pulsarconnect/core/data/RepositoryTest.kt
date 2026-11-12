@@ -67,6 +67,26 @@ class RepositoryTest {
     }
 
     @Test
+    fun `home aggregates include only completed trips for the requested bike`() = runTest {
+        val vin = "MD2ABCDEFGH123456"
+        val other = "MD2ABCDEFGH654321"
+        val first = tripRepo.startTrip(vin, 100.0, null, null)
+        now += 3_600_000
+        tripRepo.endTrip(first, 140.0, null, null)
+        val second = tripRepo.startTrip(vin, 140.0, null, null)
+        now += 3_600_000
+        tripRepo.endTrip(second, 200.0, null, null)
+        val foreign = tripRepo.startTrip(other, 0.0, null, null)
+        now += 3_600_000
+        tripRepo.endTrip(foreign, 60.0, null, null)
+        tripRepo.startTrip(vin, 500.0, null, null)
+
+        assertEquals(100.0, tripRepo.totalDistanceKm(vin))
+        assertEquals(2, tripRepo.completedTripsBetween(vin, 0, Long.MAX_VALUE))
+        assertEquals(0, tripRepo.completedTripsBetween(vin, now + 1, Long.MAX_VALUE))
+    }
+
+    @Test
     fun `bike profile upsert and fetch`() = runTest {
         val profile = BikeProfile(
             vin = "MD2ABCDEFGH123456",

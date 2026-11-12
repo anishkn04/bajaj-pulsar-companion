@@ -282,4 +282,30 @@ class DatabaseTest {
         assertEquals(1, trips2.size)
         assertEquals("VIN2", trips2.first().vin)
     }
+
+    @Test
+    fun `home aggregates sum completed distance and count a date range`() = runTest {
+        val base = 1_000_000L
+        fun trip(
+            vin: String,
+            start: Long,
+            end: Long?,
+            distance: Double?,
+        ) = Trip(
+            vin = vin, startTime = start, endTime = end, startOdometer = 100.0,
+            endOdometer = distance?.let { 100.0 + it }, distanceKm = distance,
+            avgSpeedKmph = null, maxSpeedKmph = null, fuelUsedLiters = null,
+            startLat = null, startLon = null, endLat = null, endLon = null,
+        )
+
+        db.insertTrip(trip("VIN", base, base + 1_000, 40.0))
+        db.insertTrip(trip("VIN", base + 2_000, base + 3_000, 60.0))
+        db.insertTrip(trip("VIN", base - 10_000, base - 9_000, 25.0))
+        db.insertTrip(trip("MD2ABCDEFGH123456", base, base + 1_000, 999.0))
+        db.insertTrip(trip("VIN", base, null, null))
+
+        assertEquals(125.0, db.totalDistanceForVin("VIN"), 0.0)
+        assertEquals(2, db.completedTripsBetweenForVin("VIN", base, base + 10_000))
+        assertEquals(0, db.completedTripsBetweenForVin("VIN", base + 5_000, base + 10_000))
+    }
 }

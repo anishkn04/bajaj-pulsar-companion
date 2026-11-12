@@ -91,6 +91,24 @@ class AndroidDatabase(
             )
         }
 
+        override suspend fun totalDistanceKm(vin: String): Double = access { db ->
+            db.query(
+                "SELECT COALESCE(SUM(distance_km), 0) AS total FROM trip WHERE vin = ?",
+                arrayOf(vin),
+            ) { it.getDouble(it.getColumnIndexOrThrow("total")) }.single()
+        }
+
+        override suspend fun completedTripsBetween(vin: String, fromMillis: Long, toMillis: Long): Int {
+            require(fromMillis <= toMillis) { "Date range must not be reversed" }
+            return access { db ->
+                db.query(
+                    "SELECT COUNT(*) AS total FROM trip WHERE vin = ? AND end_time IS NOT NULL " +
+                        "AND start_time >= ? AND start_time < ?",
+                    arrayOf(vin, fromMillis.toString(), toMillis.toString()),
+                ) { it.getInt(it.getColumnIndexOrThrow("total")) }.single()
+            }
+        }
+
         override suspend fun addTelemetry(tripId: Long, point: TelemetryPoint): Unit = access { db ->
             db.transaction {
                 requireNotNull(findTrip(tripId)) { "Telemetry requires an existing trip" }

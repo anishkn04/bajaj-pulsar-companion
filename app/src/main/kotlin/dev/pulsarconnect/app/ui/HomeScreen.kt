@@ -83,6 +83,8 @@ internal fun HomeScreen(
             }
         }
 
+        RecordSummaryCard(state, now)
+
         HomeFeatureCard(
             title = "Bike link",
             value = bleStatusValue(bleState.connection),
@@ -128,6 +130,46 @@ internal fun HomeScreen(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun RecordSummaryCard(state: UiState.SignedIn, now: Long) {
+    val next = nextPendingReminder(state.reminders, state.lastOdometer, now)
+    PulsarCard {
+        Text(
+            text = "Record summary",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            MetricBlock(
+                label = "Total distance",
+                value = "${formatRecordNumber(state.totalDistanceKm)} km",
+                modifier = Modifier.weight(1f),
+            )
+            MetricBlock(
+                label = "Trips this month",
+                value = state.tripsThisMonth.toString(),
+                modifier = Modifier.weight(1f),
+            )
+        }
+        PulsarDivider()
+        Text(
+            text = "Next due reminder",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = next?.title ?: "Nothing pending",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            text = next?.let { reminderTimingLabel(it, now) } ?: "No pending service reminders.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

@@ -492,4 +492,21 @@ class AndroidDatabaseTest {
         val replacement = db.trips.startTrip(bike.vin, 101.0, null, null)
         assertEquals(replacement, db.trips.getActiveTrip(bike.vin))
     }
+
+    @Test fun homeAggregatesUseCompletedTripsForTheBikeOnly() = runBlocking {
+        val first = db.trips.startTrip(bike.vin, 100.0, null, null)
+        now += 1_000
+        db.trips.endTrip(first, 140.0, null, null)
+        val second = db.trips.startTrip(bike.vin, 140.0, null, null)
+        now += 1_000
+        db.trips.endTrip(second, 200.0, null, null)
+        val foreign = db.trips.startTrip(other.vin, 0.0, null, null)
+        now += 1_000
+        db.trips.endTrip(foreign, 60.0, null, null)
+        db.trips.startTrip(bike.vin, 500.0, null, null)
+
+        assertEquals(100.0, db.trips.totalDistanceKm(bike.vin), 0.0)
+        assertEquals(2, db.trips.completedTripsBetween(bike.vin, 0, Long.MAX_VALUE))
+        assertEquals(0, db.trips.completedTripsBetween(bike.vin, now + 1, Long.MAX_VALUE))
+    }
 }

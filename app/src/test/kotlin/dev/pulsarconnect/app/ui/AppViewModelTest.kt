@@ -255,6 +255,30 @@ class AppViewModelTest {
         assertTrue(signedIn(vm).trips.all { it.vin == vin })
     }
 
+    @Test fun `home stats cover the whole local history for the signed in bike`() = runTest(dispatcher) {
+        now = Instant.parse("2026-10-05T09:00:00Z").toEpochMilli()
+        val october = trips.startTrip(vin, 10.0, null, null)
+        now += 3_600_000
+        trips.endTrip(october, 60.0, null, null)
+        now = Instant.parse("2026-11-01T10:00:00Z").toEpochMilli()
+        val first = trips.startTrip(vin, 100.0, null, null)
+        now += 3_600_000
+        trips.endTrip(first, 140.0, null, null)
+        val second = trips.startTrip(vin, 140.0, null, null)
+        now += 3_600_000
+        trips.endTrip(second, 200.0, null, null)
+        val foreign = trips.startTrip("MD2ABCDEFGH654321", 0.0, null, null)
+        now += 3_600_000
+        trips.endTrip(foreign, 50.0, null, null)
+        val vm = viewModel()
+        advanceUntilIdle()
+        val state = signedIn(vm)
+        // October contributes 50 km to the total but not to the November count; the other
+        // bike never contributes.
+        assertEquals(150.0, state.totalDistanceKm, 0.0)
+        assertEquals(2, state.tripsThisMonth)
+    }
+
     @Test fun `reminders require title and threshold validate dates and can be completed`() = runTest(dispatcher) {
         val vm = viewModel()
         advanceUntilIdle()

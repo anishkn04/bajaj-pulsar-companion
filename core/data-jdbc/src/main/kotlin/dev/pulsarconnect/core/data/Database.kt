@@ -326,6 +326,29 @@ class Database private constructor(
         }
     }
 
+    suspend fun totalDistanceForVin(vin: String): Double = withContext(Dispatchers.IO) {
+        dataSource.connection.use { conn ->
+            conn.prepareStatement("SELECT COALESCE(SUM(distance_km), 0) AS total FROM trip WHERE vin = ?").use { stmt ->
+                stmt.setString(1, vin)
+                stmt.executeQuery().use { rs -> if (rs.next()) rs.getDouble("total") else 0.0 }
+            }
+        }
+    }
+
+    suspend fun completedTripsBetweenForVin(vin: String, fromMillis: Long, toMillis: Long): Int = withContext(Dispatchers.IO) {
+        dataSource.connection.use { conn ->
+            conn.prepareStatement(
+                "SELECT COUNT(*) AS total FROM trip WHERE vin = ? AND end_time IS NOT NULL " +
+                    "AND start_time >= ? AND start_time < ?",
+            ).use { stmt ->
+                stmt.setString(1, vin)
+                stmt.setLong(2, fromMillis)
+                stmt.setLong(3, toMillis)
+                stmt.executeQuery().use { rs -> if (rs.next()) rs.getInt("total") else 0 }
+            }
+        }
+    }
+
     private fun mapTrip(rs: java.sql.ResultSet): Trip = Trip(
         id = rs.getLong("id"),
         vin = rs.getString("vin"),
