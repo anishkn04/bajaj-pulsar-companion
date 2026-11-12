@@ -19,6 +19,7 @@ data class BikeLinkState(
     val mirroringError: String? = null,
     val callerMirroringAvailable: Boolean = false,
     val missedCallMirroringAvailable: Boolean = false,
+    val passiveWait: PassiveWaitState = PassiveWaitState.OFF,
 )
 
 /**
@@ -57,6 +58,16 @@ class BikeLinkController(
     private val _state = MutableStateFlow(BikeLinkState(settings = preferences.settings.value))
     val state: StateFlow<BikeLinkState> = _state.asStateFlow()
 
+    /** Recent in-memory link events for the diagnostics card and bug-report export. */
+    val linkLog = LinkLog()
+    val logEntries: StateFlow<List<LinkLogEntry>> = linkLog.entries
+
+    /** True while Android has been asked to hold a passive connection. */
+    private var passiveWaitArmed = false
+
+    /** True once a passive wait was the reason a connection attached. */
+    private var passiveAttached = false
+
     /**
      * True while the app is in the background without background mode. The mirroring intent stays
      * armed, but nothing may reconnect until the rider returns to the app.
@@ -69,13 +80,21 @@ class BikeLinkController(
     init {
         scope.launch {
             preferences.settings.collect { settings ->
+                logSettingChanges(_state.value.settings, settings)
                 _state.update { it.copy(settings = settings) }
                 reconcile()
             }
         }
         scope.launch {
+            var previous: ConnectionState? = null
             connection.state.collect { current ->
-                _state.update { it.copy(connection = current) }
+                if (current != previous) {
+                    logTransition(previous, current)
+                    previous = current
+                }
+                _state.update {
+                    it.copy(connection = current, passiveWait = passiveWaitState())
+                }
                 reconcile()
             }
         }
@@ -129,7 +148,7 @@ class BikeLinkController(
 
     fun onForeground() {
         suspended = false
-        connection.setWaitForBike(shouldWaitForBike())
+        setPassiveWait(shouldWaitForBike())
         ensureConnectedIfWanted(retryFailure = true)
     }
 
@@ -140,11 +159,15 @@ class BikeLinkController(
     fun onBackground() {
         if (preferences.settings.value.runsInBackground) {
             // Keep the link armed and let Android attach passively when the bike powers on.
-            connection.setWaitForBike(true)
+            setPassiveWait(true)
             return
         }
         suspended = true
-        connection.setWaitForBike(false)
+        setPassiveWait(false)
+        linkLog.record(
+            LinkLogKind.SETTING,
+            "Background mirroring is off; the link is released while the app is in the background",
+        )
         stopRuntime()
         connection.stop()
     }
@@ -156,12 +179,12 @@ class BikeLinkController(
         preferences.setMirroring(enabled)
         if (!enabled) {
             stopRuntime()
-            connection.setWaitForBike(false)
+            setPassiveWait(false)
             connection.setAutoReconnect(_state.value.autoConnect)
             _state.update { it.copy(mirroringError = null) }
         } else {
             connection.setAutoReconnect(true)
-            connection.setWaitForBike(shouldWaitForBike())
+            setPassiveWait(shouldWaitForBike())
             ensureConnectedIfWanted(retryFailure = true)
         }
     }
@@ -235,10 +258,12 @@ class BikeLinkController(
     }
 
     private fun connectTo(target: BikeTarget) {
+        val waitForBike = shouldWaitForBike()
+        setPassiveWaitIntent(waitForBike)
         connection.connect(
             target,
             autoReconnect = preferences.settings.value.mirroring || _state.value.autoConnect,
-            waitForBike = shouldWaitForBike(),
+            waitForBike = waitForBike,
         )
     }
 
@@ -274,7 +299,7 @@ class BikeLinkController(
 
     private fun reconcile() {
         val settings = preferences.settings.value
-        connection.setWaitForBike(shouldWaitForBike())
+        setPassiveWait(shouldWaitForBike())
         val connected = connection.state.value as? ConnectionState.Connected
 
         val phoneEndpoint = connected != null &&
@@ -332,6 +357,9 @@ class BikeLinkController(
             preferences.settings.value.mirroring &&
             connected != null &&
             PhoneStatusProtocol.isSupportedBy(connected.services)
+        if (error != null || stoppedUnexpectedly) {
+            linkLog.record(LinkLogKind.FAILURE, "Phone status mirroring stopped")
+        }
         _state.update {
             it.copy(
                 mirroringActive = false,
@@ -341,6 +369,71 @@ class BikeLinkController(
                     else -> null
                 },
             )
+        }
+    }
+
+    private fun setPassiveWait(enabled: Boolean) {
+        connection.setWaitForBike(enabled)
+        setPassiveWaitIntent(enabled)
+    }
+
+    /** Records a changed passive-wait intent without touching an in-flight connection run. */
+    private fun setPassiveWaitIntent(enabled: Boolean) {
+        if (enabled == passiveWaitArmed) return
+        passiveWaitArmed = enabled
+        passiveAttached = false
+        linkLog.record(
+            LinkLogKind.PASSIVE_WAIT,
+            if (enabled) "Passive wait armed" else "Passive wait disarmed",
+        )
+        _state.update { it.copy(passiveWait = passiveWaitState()) }
+    }
+
+    private fun passiveWaitState(): PassiveWaitState = when {
+        !passiveWaitArmed -> PassiveWaitState.OFF
+        passiveAttached && connection.state.value is ConnectionState.Connected ->
+            PassiveWaitState.ATTACHED
+        connection.state.value is ConnectionState.WaitingForBike -> PassiveWaitState.WAITING
+        else -> PassiveWaitState.ARMED
+    }
+
+    private fun logTransition(previous: ConnectionState?, current: ConnectionState) {
+        if (passiveWaitArmed &&
+            current is ConnectionState.Connected &&
+            previous !is ConnectionState.Connected
+        ) {
+            passiveAttached = true
+            linkLog.record(LinkLogKind.PASSIVE_WAIT, "Passive wait attached to the bike")
+        }
+        linkLog.record(LinkLogKind.TRANSITION, linkTransitionLogMessage(current))
+        if (current is ConnectionState.Failed) {
+            linkLog.record(LinkLogKind.FAILURE, linkFailureLogMessage(current.reason))
+        }
+    }
+
+    /** Logs intent changes without ever writing the armed VIN or a Bluetooth address. */
+    private fun logSettingChanges(previous: BikeLinkSettings, current: BikeLinkSettings) {
+        fun record(message: String) = linkLog.record(LinkLogKind.SETTING, message)
+        if (previous.mirroring != current.mirroring) {
+            record(if (current.mirroring) "Mirroring armed" else "Mirroring paused")
+        }
+        if (previous.keepInBackground != current.keepInBackground) {
+            record(
+                if (current.keepInBackground) "Background mirroring on"
+                else "Background mirroring off",
+            )
+        }
+        if (previous.startOnBoot != current.startOnBoot) {
+            record(if (current.startOnBoot) "Boot resume on" else "Boot resume off")
+        }
+        if (previous.mirrorCallerName != current.mirrorCallerName) {
+            record(if (current.mirrorCallerName) "Caller-name mirroring on" else "Caller-name mirroring off")
+        }
+        if (previous.mirrorMissedCalls != current.mirrorMissedCalls) {
+            record(if (current.mirrorMissedCalls) "Missed-call mirroring on" else "Missed-call mirroring off")
+        }
+        if (previous.armedVin != current.armedVin) {
+            record(if (current.armedVin != null) "Bike armed for background link" else "Bike unarmed")
         }
     }
 

@@ -568,4 +568,58 @@ class BikeLinkControllerTest {
 
         assertFalse(controller.controlState.value.polling)
     }
+
+    @Test
+    fun `passive wait is logged when armed, when it attaches, and when it disarms`() = runTest {
+        devices.select(target)
+        fake.connectFailure = BleException(BleFailure.GattError("connect", 133))
+        val preferences = InMemoryBikeLinkPreferences(
+            BikeLinkSettings(mirroring = true, keepInBackground = true),
+        )
+        val (controller, _) = controller(preferences)
+        controller.onSession(vin)
+        runCurrent()
+
+        assertEquals(PassiveWaitState.WAITING, controller.state.value.passiveWait)
+        assertTrue(controller.logEntries.value.any {
+            it.kind == LinkLogKind.PASSIVE_WAIT && it.message == "Passive wait armed"
+        })
+        assertTrue(controller.logEntries.value.any {
+            it.kind == LinkLogKind.TRANSITION && it.message.contains("Waiting for the bike")
+        })
+
+        fake.connectFailure = null
+        advanceTimeBy(BikeConnection.DEFAULT_WAITING_RETRY_DELAYS.first() + 1)
+        runCurrent()
+
+        assertTrue(controller.state.value.connection is ConnectionState.Connected)
+        assertEquals(PassiveWaitState.ATTACHED, controller.state.value.passiveWait)
+        assertTrue(controller.logEntries.value.any {
+            it.kind == LinkLogKind.PASSIVE_WAIT && it.message.contains("attached")
+        })
+
+        controller.setKeepInBackground(false)
+        runCurrent()
+
+        assertEquals(PassiveWaitState.OFF, controller.state.value.passiveWait)
+        assertTrue(controller.logEntries.value.any {
+            it.kind == LinkLogKind.PASSIVE_WAIT && it.message == "Passive wait disarmed"
+        })
+    }
+
+    @Test
+    fun `settings and transition log entries never include the VIN or address`() = runTest {
+        devices.select(target)
+        val (controller, _) = controller()
+        controller.onSession(vin)
+        controller.setMirroring(true)
+        runCurrent()
+
+        val text = controller.linkLog.snapshot().joinToString("\n") { it.message }
+
+        assertTrue(text.contains("Mirroring armed"))
+        assertTrue(text.contains("Bike armed"))
+        assertFalse(text.contains(vin))
+        assertFalse(text.contains(target.id))
+    }
 }

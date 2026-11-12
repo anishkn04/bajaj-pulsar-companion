@@ -31,6 +31,7 @@ import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Phone
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.TwoWheeler
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -49,6 +50,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import dev.pulsarconnect.app.ble.AndroidBlePermissions
@@ -59,6 +61,12 @@ import dev.pulsarconnect.core.ble.ClusterControlState
 import dev.pulsarconnect.core.ble.ConnectionState
 import dev.pulsarconnect.core.ble.ControlProtocol
 import dev.pulsarconnect.core.ble.DiscoveredDevice
+import dev.pulsarconnect.core.ble.LinkLogEntry
+import dev.pulsarconnect.core.ble.exportLinkLog
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 
 private enum class PendingBleAction { SCAN, CONNECT }
 
@@ -246,6 +254,10 @@ internal fun BikeConnectionScreen(
                     }
                 }
             }
+        }
+
+        item {
+            LinkDiagnosticsCard(bleState)
         }
 
         if (connection is ConnectionState.Connected) {
@@ -569,6 +581,151 @@ private fun DeviceRow(
         }
     }
 }
+
+@Composable
+private fun LinkDiagnosticsCard(state: BleUiState) {
+    val context = LocalContext.current
+    val diagnostics = linkDiagnostics(state)
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    PulsarCard {
+        Text(
+            text = "Why isn't it mirroring?",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = diagnostics.blocker,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (state.connection is ConnectionState.Connected &&
+                state.phoneStatusSending
+            ) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurface
+            },
+        )
+        PulsarDivider()
+        DiagnosticRow("Background mirroring", diagnostics.background)
+        DiagnosticRow("Boot resume", diagnostics.boot)
+        DiagnosticRow("Passive wait", diagnostics.passiveWait)
+        PulsarDivider()
+        DiagnosticsEventRow(
+            label = "Last link transition",
+            entry = diagnostics.lastTransition,
+            emptyText = "No link transitions recorded yet.",
+        )
+        DiagnosticsEventRow(
+            label = "Last failure",
+            entry = diagnostics.lastFailure,
+            emptyText = "No failures since the app started.",
+        )
+        TextButton(onClick = { expanded = !expanded }) {
+            Text(if (expanded) "Hide recent events" else "Show recent events")
+        }
+        AnimatedVisibility(visible = expanded) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (diagnostics.recent.isEmpty()) {
+                    Text(
+                        "No link events recorded yet.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                diagnostics.recent.forEach { entry ->
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        StatusPill(text = entry.kind.label)
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(entry.message, style = MaterialTheme.typography.bodySmall)
+                            Text(
+                                linkLogTimestamp(entry.timestampMillis),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        PillButton(
+            label = "Share link log",
+            onClick = {
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_SUBJECT, "Pulsar Connect link log")
+                    putExtra(Intent.EXTRA_TEXT, exportLinkLog(state.linkLog))
+                }
+                context.startActivity(Intent.createChooser(intent, "Share link log"))
+            },
+            style = PillStyle.Tonal,
+            icon = Icons.Outlined.Share,
+        )
+        Text(
+            "The exported log redacts VIN-shaped and Bluetooth-address-shaped text.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun DiagnosticRow(label: String, value: String) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.End,
+            modifier = Modifier.weight(1.4f),
+        )
+    }
+}
+
+@Composable
+private fun DiagnosticsEventRow(
+    label: String,
+    entry: LinkLogEntry?,
+    emptyText: String,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = entry?.message ?: emptyText,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        if (entry != null) {
+            Text(
+                text = linkLogTimestamp(entry.timestampMillis),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+private val linkLogTimestampFormatter =
+    DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM, FormatStyle.SHORT)
+
+private fun linkLogTimestamp(millis: Long): String =
+    linkLogTimestampFormatter.format(
+        Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()),
+    )
 
 @Composable
 private fun DiagnosticsCard(

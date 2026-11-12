@@ -12,6 +12,8 @@ import dev.pulsarconnect.core.ble.BleTransport
 import dev.pulsarconnect.core.ble.ClusterControlState
 import dev.pulsarconnect.core.ble.ConnectionState
 import dev.pulsarconnect.core.ble.DiscoveredDevice
+import dev.pulsarconnect.core.ble.LinkLogEntry
+import dev.pulsarconnect.core.ble.PassiveWaitState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -46,6 +48,8 @@ data class BleUiState(
     val notificationAccessGranted: Boolean = false,
     val settings: BikeLinkSettings = BikeLinkSettings(),
     val controlState: ClusterControlState = ClusterControlState(),
+    val passiveWait: PassiveWaitState = PassiveWaitState.OFF,
+    val linkLog: List<LinkLogEntry> = emptyList(),
 )
 
 /** Hook for the app layer to start/stop the foreground service when mirroring changes. */
@@ -116,8 +120,14 @@ class BleViewModel(
                         missedCallEnabled = link.settings.mirrorMissedCalls,
                         callerNameAvailable = link.callerMirroringAvailable,
                         missedCallAvailable = link.missedCallMirroringAvailable,
+                        passiveWait = link.passiveWait,
                     )
                 }
+            }
+        }
+        scope.launch {
+            controller.logEntries.collect { entries ->
+                _state.update { it.copy(linkLog = entries) }
             }
         }
         scope.launch {
