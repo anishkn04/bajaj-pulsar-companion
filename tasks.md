@@ -72,7 +72,7 @@ reminders. A mistyped odometer is also currently unfixable. This is the highest-
   Clear `completed`/`completedAtMillis` and re-arm alerts. Acceptance: completing then undoing
   makes the reminder due again when its threshold is met.
 
-- [ ] **PC-09 — Recurring service reminders.**
+- [x] **PC-09 — Recurring service reminders.** (`b9d0846`)
   "Every N km / N days" reminders that re-arm the next occurrence when one is completed.
   Acceptance: completing a recurring reminder creates exactly one next occurrence, not a loop.
 
