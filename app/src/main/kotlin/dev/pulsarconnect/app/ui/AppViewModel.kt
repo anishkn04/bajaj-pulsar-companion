@@ -32,8 +32,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -49,6 +51,7 @@ class AppViewModel(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val notificationActions: ReminderNotificationActions = NoOpReminderNotifications,
     private val backupService: LocalBackupService = LocalBackupService(trips, reminders, bikes),
+    private val reminderChanges: Flow<Unit> = emptyFlow(),
     private val fetchVehicles: suspend () -> List<Bike> = {
         sessionManager.withSession { stored ->
             api.vehicles(requireNotNull(stored.session.userToken) { "Missing vehicle token" })
@@ -71,6 +74,26 @@ class AppViewModel(
             } catch (error: Exception) {
                 if (error is CancellationException) throw error
                 _state.value = UiState.SignedOut(error = "Could not read the saved session. Try signing in again.")
+            }
+        }
+    }
+
+    init {
+        // A reminder answered from the notification shade bypasses this view model; reload so
+        // the list and due states reflect the action as soon as the app is visible again.
+        viewModelScope.launch {
+            reminderChanges.collect {
+                val current = _state.value as? UiState.SignedIn ?: return@collect
+                if (current.busy || current.localLoading || current.localLoadFailed) return@collect
+                try {
+                    reloadLocal(
+                        current.vin, generation,
+                        maxOf(PAGE_SIZE, current.trips.size),
+                    )
+                } catch (error: Exception) {
+                    if (error is CancellationException) throw error
+                    // Best effort; the next explicit load shows the change.
+                }
             }
         }
     }
@@ -540,6 +563,7 @@ class AppViewModel(
                 container.sessionManager, container.api,
                 container.database.bikes, container.database.trips, container.database.reminders,
                 notificationActions = container.reminderNotifications,
+                reminderChanges = container.reminderActions.changes,
                 onSignedOut = container.bikeConnection::stop,
             ) as T
         }

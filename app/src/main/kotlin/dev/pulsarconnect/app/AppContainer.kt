@@ -20,6 +20,8 @@ import dev.pulsarconnect.app.ble.PhoneStatusSource
 import dev.pulsarconnect.app.calls.CallNotificationBus
 import dev.pulsarconnect.app.calls.CallNotificationParser
 import dev.pulsarconnect.app.data.AndroidDatabase
+import dev.pulsarconnect.app.notifications.ReminderActionBus
+import dev.pulsarconnect.app.notifications.ReminderActionHandler
 import dev.pulsarconnect.app.notifications.ReminderNotificationManager
 import dev.pulsarconnect.core.ble.BikeConnection
 import dev.pulsarconnect.core.ble.BikeDeviceStore
@@ -59,6 +61,12 @@ class AppContainer(context: Context) {
     val sessionManager = BajajSessionManager(api, sessionRepository)
     val reminderNotifications: ReminderNotificationManager = ReminderNotificationManager(
         context.applicationContext, sessionRepository, database.trips, database.reminders,
+    )
+    /** Lets a notification action tell the open UI to reload reminders. */
+    val reminderActions = ReminderActionBus()
+    /** Shared by the notification receiver; mirrors the in-app reminder mutations. */
+    val reminderActionHandler = ReminderActionHandler(
+        sessionRepository, database.reminders, reminderNotifications,
     )
 
     // BLE lives in the application scope so it can outlive any single view model.

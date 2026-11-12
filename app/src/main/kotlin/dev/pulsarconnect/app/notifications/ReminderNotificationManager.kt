@@ -8,6 +8,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.drawable.Icon
 import android.os.Build
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
@@ -179,7 +180,7 @@ class ReminderNotificationManager(
                 if (remembered(DELIVERED, id) || remembered(COMPLETED, id)) return@synchronized
                 try {
                     if (!canPost()) return@synchronized
-                    notifications.notify(tag(id), NOTIFICATION_ID, notification())
+                    notifications.notify(tag(id), NOTIFICATION_ID, notification(id))
                     // A blocked channel/permission must not consume the delivery record.
                     if (canPost()) remember(DELIVERED, id)
                 } catch (_: SecurityException) {
@@ -190,7 +191,7 @@ class ReminderNotificationManager(
         }
     }
 
-    private fun notification(): Notification {
+    private fun notification(reminderId: Long): Notification {
         val contentIntent = PendingIntent.getActivity(
             context, 0, Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -204,11 +205,27 @@ class ReminderNotificationManager(
             .setAutoCancel(true)
             .setOnlyAlertOnce(true)
             .setCategory(Notification.CATEGORY_REMINDER)
+        // The lockscreen-facing public version stays action-free: acting on a reminder must
+        // not be possible without unlocking the phone.
         return builder()
             .setVisibility(Notification.VISIBILITY_PRIVATE)
+            .addAction(action("Mark done", ReminderActionReceiver.ACTION_MARK_DONE, reminderId))
+            .addAction(action("Snooze", ReminderActionReceiver.ACTION_SNOOZE, reminderId))
             .setPublicVersion(builder().setVisibility(Notification.VISIBILITY_PUBLIC).build())
             .build()
     }
+
+    private fun action(title: String, action: String, reminderId: Long): Notification.Action =
+        Notification.Action.Builder(
+            Icon.createWithResource(context, R.drawable.ic_service_reminder),
+            title,
+            PendingIntent.getBroadcast(
+                context,
+                ReminderActionReceiver.requestCode(action, reminderId),
+                ReminderActionReceiver.intent(context, action, reminderId),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            ),
+        ).build()
 
     internal companion object {
         const val CHANNEL_ID = "service_reminders"

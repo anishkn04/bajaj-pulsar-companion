@@ -590,4 +590,29 @@ class ReminderNotificationTest {
         assertTrue(manager.enabled) // Sign-out pauses scheduling, not the user's opt-in.
         assertTrue(work.getWorkInfosForUniqueWork(ReminderNotificationManager.PERIODIC_WORK).get(10, TimeUnit.SECONDS).all { it.state.isFinished })
     }
+
+    @Test fun `notification offers mark done and snooze for the same reminder but not on the lockscreen`() = runBlocking {
+        val reminder = due()
+        manager.setEnabled(true)
+        worker().doWork()
+        val n = notifications.activeNotifications.single().notification
+        assertEquals(listOf("Mark done", "Snooze"), n.actions.map { it.title.toString() })
+
+        val markDone = n.actions[0].actionIntent
+        val markDoneIntent = shadowOf(markDone).savedIntent
+        assertEquals(ReminderActionReceiver::class.java.name, markDoneIntent.component!!.className)
+        assertEquals(ReminderActionReceiver.ACTION_MARK_DONE, markDoneIntent.action)
+        assertEquals(reminder.id, markDoneIntent.getLongExtra(ReminderActionReceiver.EXTRA_REMINDER_ID, -1))
+        assertTrue(shadowOf(markDone).isImmutable)
+
+        val snoozeIntent = shadowOf(n.actions[1].actionIntent).savedIntent
+        assertEquals(ReminderActionReceiver.ACTION_SNOOZE, snoozeIntent.action)
+        assertEquals(reminder.id, snoozeIntent.getLongExtra(ReminderActionReceiver.EXTRA_REMINDER_ID, -1))
+        assertNotEquals(
+            ReminderActionReceiver.requestCode(ReminderActionReceiver.ACTION_MARK_DONE, reminder.id!!),
+            ReminderActionReceiver.requestCode(ReminderActionReceiver.ACTION_SNOOZE, reminder.id!!),
+        )
+        // Locked phones must not offer reminder actions.
+        assertTrue(n.publicVersion.actions.isNullOrEmpty())
+    }
 }

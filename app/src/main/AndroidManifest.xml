@@ -49,6 +49,12 @@
             android:foregroundServiceType="connectedDevice"
             android:exported="false" />
 
+        <!-- "Mark done" and "Snooze" from a reminder notification. Explicit, non-exported
+             intents only; the receiver verifies the signed-in VIN before mutating anything. -->
+        <receiver
+            android:name=".notifications.ReminderActionReceiver"
+            android:exported="false" />
+
         <!-- Resumes the link after reboot when background mode + boot resume are on. -->
         <receiver
             android:name=".ble.BootReceiver"
