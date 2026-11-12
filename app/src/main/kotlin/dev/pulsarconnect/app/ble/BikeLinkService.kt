@@ -31,12 +31,13 @@ internal fun shouldRunBikeLinkService(
     hasSelectedBike: Boolean,
 ): Boolean = settings.runsInBackground && settings.armedVin != null && hasSelectedBike
 
-/** Maps an incoming intent to the service's two lifecycle commands. */
-internal enum class BikeLinkServiceCommand { RESUME, STOP }
+/** Maps an incoming intent to the service's lifecycle commands. */
+internal enum class BikeLinkServiceCommand { RESUME, PAUSE, STOP }
 
 internal fun bikeLinkServiceCommand(action: String?): BikeLinkServiceCommand = when (action) {
     // A sticky restart arrives with a null intent and must resume foreground operation.
     BikeLinkService.ACTION_STOP -> BikeLinkServiceCommand.STOP
+    BikeLinkService.ACTION_PAUSE -> BikeLinkServiceCommand.PAUSE
     else -> BikeLinkServiceCommand.RESUME
 }
 
@@ -60,6 +61,9 @@ class BikeLinkService : Service() {
 
         private const val CHANNEL_ID = "dev.pulsarconnect.app.ble.bike_link"
         private const val NOTIFICATION_ID = 1
+
+        /** Disarms mirroring without forgetting the armed bike or background preference. */
+        const val ACTION_PAUSE = "dev.pulsarconnect.app.ble.action.PAUSE"
     }
 
     private lateinit var controller: BikeLinkController
@@ -89,6 +93,11 @@ class BikeLinkService : Service() {
                 stopSelf(startId)
                 return START_NOT_STICKY
             }
+            BikeLinkServiceCommand.PAUSE -> {
+                // Pause persists the rider's intent to stop mirroring. The armed bike and the
+                // background preference stay, so the next app launch can resume the same link.
+                controller.setMirroring(false)
+            }
             BikeLinkServiceCommand.RESUME -> Unit
         }
 
@@ -100,10 +109,10 @@ class BikeLinkService : Service() {
             return START_NOT_STICKY
         }
 
-        attach()
         // Start foreground before touching the controller so a slow connect cannot trip the
         // system's foreground-service timeout.
         startForeground(Companion.NOTIFICATION_ID, buildNotification())
+        attach()
         // (Re)attach to the armed bike after boot or a process restart. The controller's
         // existing connect-with-response logic handles the actual connection; this service
         // only keeps the process alive while mirroring is on.
@@ -130,6 +139,11 @@ class BikeLinkService : Service() {
                     stopSelf()
                 }
             }.launchIn(scope)
+            // Keep the ongoing notification truthful as the link moves between connecting,
+            // waiting, connected, and failed states.
+            controller.state.onEach {
+                if (attached) updateNotification()
+            }.launchIn(scope)
         }
     }
 
@@ -155,12 +169,29 @@ class BikeLinkService : Service() {
         NotificationManagerCompat.from(this).createNotificationChannel(channel)
     }
 
+    private fun updateNotification() {
+        try {
+            NotificationManagerCompat.from(this)
+                .notify(Companion.NOTIFICATION_ID, buildNotification())
+        } catch (_: SecurityException) {
+            // Notification permission can be revoked while the service is running. The
+            // foreground notification is still owned by the system; only our update is lost.
+        }
+    }
+
     private fun buildNotification(): Notification {
         val stopIntent = Intent(applicationContext, BikeLinkService::class.java).apply {
             action = Companion.ACTION_STOP
         }
         val stopPending = PendingIntent.getService(
             applicationContext, 0, stopIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val pauseIntent = Intent(applicationContext, BikeLinkService::class.java).apply {
+            action = Companion.ACTION_PAUSE
+        }
+        val pausePending = PendingIntent.getService(
+            applicationContext, 1, pauseIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val openIntent = Intent(applicationContext, MainActivity::class.java).apply {
@@ -172,15 +203,21 @@ class BikeLinkService : Service() {
             applicationContext, 0, openIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        val state = controller.state.value
+        val armedVin = preferences.settings.value.armedVin
+        val bikeName = bikeLinkDisplayName(
+            state.selected?.name ?: armedVin?.let { bikeDevices.selected(it)?.name },
+        )
         return NotificationCompat.Builder(applicationContext, Companion.CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_service_reminder)
-            .setContentTitle(getString(R.string.bike_link_notification_title))
-            .setContentText(getString(R.string.bike_link_notification_text))
+            .setContentTitle(getString(R.string.bike_link_notification_title_named, bikeName))
+            .setContentText(bikeLinkNotificationState(state))
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .addAction(R.drawable.ic_service_reminder, getString(R.string.bike_link_pause_action), pausePending)
             .addAction(R.drawable.ic_service_reminder, getString(R.string.bike_link_stop_action), stopPending)
             .setContentIntent(openPending)
             .build()

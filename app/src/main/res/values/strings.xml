@@ -4,7 +4,7 @@
     <!-- Bike link foreground service -->
     <string name="bike_link_channel_name">Bike link</string>
     <string name="bike_link_channel_description">Keeps the Bluetooth bike link alive while mirroring is on.</string>
-    <string name="bike_link_notification_title">Pulsar Connect — bike link active</string>
-    <string name="bike_link_notification_text">Mirroring phone status to the cluster. Tap to return to the app.</string>
+    <string name="bike_link_notification_title_named">Pulsar Connect — %1$s</string>
+    <string name="bike_link_pause_action">Pause mirroring</string>
     <string name="bike_link_stop_action">Stop mirroring</string>
 </resources>

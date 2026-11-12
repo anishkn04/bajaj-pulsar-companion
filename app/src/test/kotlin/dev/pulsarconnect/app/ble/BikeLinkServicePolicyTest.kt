@@ -60,4 +60,9 @@ class BikeLinkServicePolicyTest {
     fun `the stop action disarms the service`() {
         assertEquals(BikeLinkServiceCommand.STOP, bikeLinkServiceCommand(BikeLinkService.ACTION_STOP))
     }
+
+    @Test
+    fun `the pause action disarms mirroring without forgetting the bike`() {
+        assertEquals(BikeLinkServiceCommand.PAUSE, bikeLinkServiceCommand(BikeLinkService.ACTION_PAUSE))
+    }
 }
