@@ -92,17 +92,17 @@ already riding. Make health and failures visible without opening the app.
   Stop. Acceptance: action updates persisted mirroring intent; notification text never includes
   a VIN or MAC.
 
-- [ ] **PC-12 — "Why isn't it mirroring?" diagnostics.**
+- [x] **PC-12 — "Why isn't it mirroring?" diagnostics.** (`03cc8a3`)
   Show the last link transition, last failure reason with timestamp, background/boot gating,
   and passive-wait state. Acceptance: a single screen or card answers "what is stopping the
   link" for every terminal state.
 
-- [ ] **PC-13 — Exportable link log for bug reports.**
+- [x] **PC-13 — Exportable link log for bug reports.** (`03cc8a3`)
   Small in-memory/ring-buffer log of state transitions and failures, exportable as text with
   VIN and MAC redacted. Acceptance: exported log passes a redaction test against synthetic
   MAC/VIN-shaped strings.
 
-- [ ] **PC-14 — Record passive-wait start/attach.**
+- [x] **PC-14 — Record passive-wait start/attach.** (`03cc8a3`)
   Log when a passive wait is armed and when it attaches, so the new background reconnect mode
   can be confirmed on-device. Acceptance: entries appear in PC-12/PC-13 output.
 
