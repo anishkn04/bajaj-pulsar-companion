@@ -116,7 +116,7 @@ already riding. Make health and failures visible without opening the app.
   Show average speed (already stored but not displayed), duration, coordinates, and a
   share-as-text / optional maps link. Acceptance: share text contains no VIN or MAC.
 
-- [ ] **PC-17 — Home stats.**
+- [x] **PC-17 — Home stats.** (`6c19837`)
   Total distance, trips this month, and next due reminder. Acceptance: values come from local
   records for the signed-in VIN only.
 
