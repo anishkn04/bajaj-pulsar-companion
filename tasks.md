@@ -128,7 +128,7 @@ already riding. Make health and failures visible without opening the app.
   Filter by date range and group by month. Acceptance: filtering works with pagination and does
   not load the entire history into memory.
 
-- [ ] **PC-20 — Theme options.**
+- [x] **PC-20 — Theme options.** (`63e123e`)
   Light / dark / system plus dynamic color. Acceptance: preference persists across restarts.
 
 - [ ] **PC-21 — Optional biometric app lock.**
