@@ -22,6 +22,19 @@ interface TripRepository {
     /** Newest start time first, then highest ID first for equal start times. */
     suspend fun getTrips(vin: String, limit: Int, offset: Int): List<Trip>
 
+    /**
+     * Newest first, restricted to trips whose start time is in [fromMillis, toMillis).
+     * Both bounds are optional, and [limit]/[offset] apply after filtering so the whole
+     * history never has to be loaded to show a page.
+     */
+    suspend fun getTripsBetween(
+        vin: String,
+        fromMillis: Long?,
+        toMillis: Long?,
+        limit: Int,
+        offset: Int,
+    ): List<Trip>
+
     /** Sum of recorded distances for this VIN; unfinished trips contribute nothing. */
     suspend fun totalDistanceKm(vin: String): Double
 
@@ -167,12 +180,31 @@ class InMemoryTripRepository(
         trips.values.firstOrNull { it.vin == vin && it.endTime == null }
     }
 
-    override suspend fun getTrips(vin: String, limit: Int, offset: Int): List<Trip> = trips.values
-        .filter { it.vin == vin }
-        .sortedWith(compareByDescending<Trip> { it.startTime }.thenByDescending { it.id })
-        .drop(offset)
-        .take(limit)
-        .toList()
+    override suspend fun getTrips(vin: String, limit: Int, offset: Int): List<Trip> =
+        getTripsBetween(vin, null, null, limit, offset)
+
+    override suspend fun getTripsBetween(
+        vin: String,
+        fromMillis: Long?,
+        toMillis: Long?,
+        limit: Int,
+        offset: Int,
+    ): List<Trip> {
+        require(limit >= 0 && offset >= 0) { "Limit and offset must be nonnegative" }
+        require(fromMillis == null || toMillis == null || fromMillis <= toMillis) {
+            "Date range must not be reversed"
+        }
+        return trips.values
+            .filter {
+                it.vin == vin &&
+                    (fromMillis == null || it.startTime >= fromMillis) &&
+                    (toMillis == null || it.startTime < toMillis)
+            }
+            .sortedWith(compareByDescending<Trip> { it.startTime }.thenByDescending { it.id })
+            .drop(offset)
+            .take(limit)
+            .toList()
+    }
 
     override suspend fun totalDistanceKm(vin: String): Double = trips.values
         .filter { it.vin == vin }

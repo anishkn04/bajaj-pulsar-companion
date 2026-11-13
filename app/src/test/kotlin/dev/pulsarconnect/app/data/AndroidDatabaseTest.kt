@@ -133,6 +133,42 @@ class AndroidDatabaseTest {
         rejects { db.trips.getTrips(bike.vin, 1, -1) }
     }
 
+    @Test fun filteredTripPagesApplyRangeBeforeLimit() = runBlocking {
+        val base = 1_000_000L
+        val starts = (0 until 5).map { base + it * 1_000L }
+        starts.forEach { start ->
+            now = start
+            val trip = db.trips.startTrip(bike.vin, 0.0, null, null)
+            now = start + 500
+            db.trips.endTrip(trip, 5.0, null, null)
+        }
+        now = starts[2]
+        val separate = db.trips.startTrip(other.vin, 0.0, null, null)
+        db.trips.endTrip(separate, 5.0, null, null)
+
+        val from = starts[1]
+        val to = starts[4]
+        assertEquals(
+            listOf(starts[3], starts[2]),
+            db.trips.getTripsBetween(bike.vin, from, to, 2, 0).map { it.startTime },
+        )
+        assertEquals(
+            listOf(starts[1]),
+            db.trips.getTripsBetween(bike.vin, from, to, 2, 2).map { it.startTime },
+        )
+        assertEquals(
+            listOf(starts[4], starts[3]),
+            db.trips.getTripsBetween(bike.vin, starts[3], null, 2, 0).map { it.startTime },
+        )
+        assertEquals(
+            listOf(starts[3], starts[2]),
+            db.trips.getTripsBetween(bike.vin, null, to, 2, 0).map { it.startTime },
+        )
+        assertEquals(5, db.trips.getTripsBetween(bike.vin, null, null, 10, 0).size)
+        rejects { db.trips.getTripsBetween(bike.vin, to, from, 10, 0) }
+        rejects { db.trips.getTripsBetween(bike.vin, null, null, -1, 0) }
+    }
+
     @Test fun activeTripLookupIgnoresFutureHistoryAndIsVinScoped() = runBlocking {
         repeat(26) { index ->
             now = 1_000_000L + index * 1_000L

@@ -12,7 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.MoreVert
@@ -43,6 +43,7 @@ import dev.pulsarconnect.core.model.Trip
 import java.text.NumberFormat
 import java.time.Duration
 import java.time.Instant
+import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -56,6 +57,8 @@ internal fun TripHistoryScreen(
     onEditTrip: (Long, String, String) -> Unit,
     onDeleteTrip: (Long) -> Unit,
     onLoadMore: () -> Unit,
+    onApplyFilter: (String, String) -> Unit,
+    onClearFilter: () -> Unit,
     onClearError: () -> Unit,
     onRetry: () -> Unit,
 ) {
@@ -65,7 +68,10 @@ internal fun TripHistoryScreen(
     }
     var editingTrip by remember { mutableStateOf<Trip?>(null) }
     var deletingTrip by remember { mutableStateOf<Trip?>(null) }
+    var fromInput by rememberSaveable(state.vin) { mutableStateOf("") }
+    var toInput by rememberSaveable(state.vin) { mutableStateOf("") }
     val enabled = !state.busy && !state.localLoading && !state.localLoadFailed
+    val filterActive = state.tripFilterFrom != null || state.tripFilterTo != null
     val completedTrips = state.trips.filter { it.endTime != null }
     LazyColumn(
         modifier = Modifier
@@ -132,16 +138,47 @@ internal fun TripHistoryScreen(
             }
         }
 
+        item { TripDateFilterCard(
+            fromInput = fromInput,
+            toInput = toInput,
+            onFromChange = { fromInput = it },
+            onToChange = { toInput = it },
+            filterActive = filterActive,
+            summary = tripFilterSummary(state.tripFilterFrom, state.tripFilterTo),
+            enabled = enabled,
+            onApply = { onApplyFilter(fromInput, toInput) },
+            onClear = {
+                fromInput = ""
+                toInput = ""
+                onClearFilter()
+            },
+        ) }
+
         item { SectionHeader("Saved trips (${completedTrips.size}${if (state.hasMoreTrips) "+" else ""})") }
         if (completedTrips.isEmpty() && !state.localLoading && !state.localLoadFailed) {
-            item { EmptyState("No trips yet. Start a manual trip above to create your first record.") }
+            item {
+                EmptyState(
+                    if (filterActive) "No trips in this date range. Clear the filter to see all trips."
+                    else "No trips yet. Start a manual trip above to create your first record.",
+                )
+            }
         }
-        items(completedTrips) { trip ->
-            TripRecordCard(
-                trip = trip,
-                onEdit = { editingTrip = trip },
-                onDelete = { deletingTrip = trip },
-            )
+        itemsIndexed(completedTrips) { index, trip ->
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                monthHeaderLabel(completedTrips, index)?.let { label ->
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                TripRecordCard(
+                    trip = trip,
+                    onEdit = { editingTrip = trip },
+                    onDelete = { deletingTrip = trip },
+                )
+            }
         }
         if (state.hasMoreTrips) {
             item {
@@ -174,6 +211,111 @@ internal fun TripHistoryScreen(
                 onDeleteTrip(trip.id!!)
             },
         )
+    }
+}
+
+@Composable
+private fun TripDateFilterCard(
+    fromInput: String,
+    toInput: String,
+    onFromChange: (String) -> Unit,
+    onToChange: (String) -> Unit,
+    filterActive: Boolean,
+    summary: String?,
+    enabled: Boolean,
+    onApply: () -> Unit,
+    onClear: () -> Unit,
+) {
+    PulsarCard {
+        Text(
+            text = "Filter by date",
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            text = "From and To are inclusive and use this device’s time zone. " +
+                "Leave either blank for an open range.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            OutlinedTextField(
+                value = fromInput,
+                onValueChange = onFromChange,
+                label = { Text("From") },
+                placeholder = { Text("yyyy-MM-dd") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+                singleLine = true,
+                enabled = enabled,
+                modifier = Modifier.weight(1f),
+                shape = MaterialTheme.shapes.medium,
+            )
+            OutlinedTextField(
+                value = toInput,
+                onValueChange = onToChange,
+                label = { Text("To") },
+                placeholder = { Text("yyyy-MM-dd") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+                singleLine = true,
+                enabled = enabled,
+                modifier = Modifier.weight(1f),
+                shape = MaterialTheme.shapes.medium,
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            PillButton(
+                label = "Apply filter",
+                onClick = onApply,
+                enabled = enabled && (fromInput.isNotBlank() || toInput.isNotBlank()),
+            )
+            if (filterActive) {
+                PillButton(
+                    label = "Clear filter",
+                    onClick = onClear,
+                    enabled = enabled,
+                    style = PillStyle.Outlined,
+                )
+            }
+        }
+        summary?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** Month label for a newest-first list; null when the previous trip is in the same month. */
+internal fun monthHeaderLabel(
+    trips: List<Trip>,
+    index: Int,
+    zone: ZoneId = ZoneId.systemDefault(),
+    locale: Locale = Locale.getDefault(),
+): String? {
+    val trip = trips.getOrNull(index) ?: return null
+    val month = YearMonth.from(Instant.ofEpochMilli(trip.startTime).atZone(zone))
+    val previous = trips.getOrNull(index - 1)
+    if (previous != null && YearMonth.from(Instant.ofEpochMilli(previous.startTime).atZone(zone)) == month) {
+        return null
+    }
+    return month.format(DateTimeFormatter.ofPattern("LLLL yyyy", locale))
+}
+
+/** Human-readable summary of the applied bounds; null when the history is unfiltered. */
+internal fun tripFilterSummary(
+    fromMillis: Long?,
+    toMillis: Long?,
+    zone: ZoneId = ZoneId.systemDefault(),
+): String? {
+    if (fromMillis == null && toMillis == null) return null
+    val from = fromMillis?.let { Instant.ofEpochMilli(it).atZone(zone).toLocalDate().toString() }
+    val to = toMillis?.let { Instant.ofEpochMilli(it).atZone(zone).toLocalDate().minusDays(1).toString() }
+    return when {
+        from != null && to != null -> "Showing trips from $from to $to."
+        from != null -> "Showing trips from $from onward."
+        else -> "Showing trips through $to."
     }
 }
 

@@ -163,7 +163,11 @@ class AppViewModel(
     private suspend fun reloadLocal(vin: String, version: Int, count: Int) {
         val bike = ensureBike(vin)
         val active = trips.getActiveTrip(vin)
-        val page = trips.getTrips(vin, count + 1, 0)
+        // Reloads keep the active trip-history filter, including after edits and deletes.
+        val filter = (_state.value as? UiState.SignedIn)?.takeIf { it.vin == vin }
+        val page = trips.getTripsBetween(
+            vin, filter?.tripFilterFrom, filter?.tripFilterTo, count + 1, 0,
+        )
         val savedReminders = reminders.getReminders(vin)
         val month = monthRange(clock(), zone)
         val totalDistance = trips.totalDistanceKm(vin)
@@ -437,13 +441,68 @@ class AppViewModel(
         _state.value = current.copy(busy = true, error = null)
         scope.launch {
             try {
-                val page = trips.getTrips(current.vin, PAGE_SIZE + 1, current.trips.size)
+                val page = trips.getTripsBetween(
+                    current.vin, current.tripFilterFrom, current.tripFilterTo,
+                    PAGE_SIZE + 1, current.trips.size,
+                )
                 updateSignedIn(current.vin, version) {
                     it.copy(trips = (it.trips + page.take(PAGE_SIZE)).distinctBy(Trip::id), hasMoreTrips = page.size > PAGE_SIZE)
                 }
             } catch (error: Exception) {
                 if (error is CancellationException) throw error
                 updateSignedIn(current.vin, version) { it.copy(error = "Could not load more trips. Please try again.") }
+            } finally {
+                updateSignedIn(current.vin, version) { it.copy(busy = false) }
+            }
+        }
+    }
+
+    /** Applies an inclusive From/To date range from YYYY-MM-DD inputs, either of which may be blank. */
+    fun applyTripFilter(fromInput: String, toInput: String) {
+        val current = _state.value as? UiState.SignedIn ?: return
+        if (current.busy || current.localLoading || current.localLoadFailed) return
+        val range = runCatching {
+            parseFilterStart(fromInput) to parseFilterEnd(toInput)
+        }.getOrElse { error ->
+            _state.value = current.copy(error = error.message ?: "Check the From and To dates.")
+            return
+        }
+        val (from, to) = range
+        if (from != null && to != null && from >= to) {
+            _state.value = current.copy(error = "The From date must not be after the To date.")
+            return
+        }
+        if (from == current.tripFilterFrom && to == current.tripFilterTo) return
+        setTripFilter(current, from, to)
+    }
+
+    fun clearTripFilter() {
+        val current = _state.value as? UiState.SignedIn ?: return
+        if (current.busy || current.localLoading || current.localLoadFailed) return
+        if (current.tripFilterFrom == null && current.tripFilterTo == null) return
+        setTripFilter(current, null, null)
+    }
+
+    private fun setTripFilter(current: UiState.SignedIn, fromMillis: Long?, toMillis: Long?) {
+        val scope = signedInScope ?: return
+        val version = generation
+        _state.value = current.copy(
+            busy = true,
+            error = null,
+            tripFilterFrom = fromMillis,
+            tripFilterTo = toMillis,
+        )
+        scope.launch {
+            try {
+                reloadLocal(current.vin, version, PAGE_SIZE)
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                updateSignedIn(current.vin, version) {
+                    it.copy(
+                        localLoadFailed = true,
+                        error = "Could not load trips for that date range. Retry loading to apply the filter.",
+                    )
+                }
             } finally {
                 updateSignedIn(current.vin, version) { it.copy(busy = false) }
             }
@@ -560,6 +619,25 @@ class AppViewModel(
             }
         }
 
+    private fun parseFilterStart(input: String): Long? =
+        input.trim().takeIf(String::isNotEmpty)?.let {
+            try {
+                LocalDate.parse(it).atStartOfDay(zone).toInstant().toEpochMilli()
+            } catch (_: java.time.DateTimeException) {
+                throw IllegalArgumentException("Enter a valid From date as YYYY-MM-DD.")
+            }
+        }
+
+    /** The To date is inclusive, so the stored bound is the start of the following day. */
+    private fun parseFilterEnd(input: String): Long? =
+        input.trim().takeIf(String::isNotEmpty)?.let {
+            try {
+                LocalDate.parse(it).plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+            } catch (_: java.time.DateTimeException) {
+                throw IllegalArgumentException("Enter a valid To date as YYYY-MM-DD.")
+            }
+        }
+
     private fun parseOptionalRepeatDistance(input: String): Double? =
         input.trim().takeIf(String::isNotEmpty)?.let {
             val value = it.toDoubleOrNull()
@@ -608,6 +686,10 @@ sealed interface UiState {
         val error: String? = null,
         val hasMoreTrips: Boolean = false,
         val lastOdometer: Double? = null,
+        /** Inclusive lower bound for the trip history, or null when unfiltered. */
+        val tripFilterFrom: Long? = null,
+        /** Exclusive upper bound; the UI's To date includes the whole selected day. */
+        val tripFilterTo: Long? = null,
         /** Local aggregate for the home card; never derived from the paginated [trips] page. */
         val totalDistanceKm: Double = 0.0,
         /** Completed trips that started in the current calendar month. */

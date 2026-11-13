@@ -194,6 +194,8 @@ private fun SignedInScreen(
                     onEditTrip = viewModel::updateTripOdometer,
                     onDeleteTrip = viewModel::deleteTrip,
                     onLoadMore = viewModel::loadMoreTrips,
+                    onApplyFilter = viewModel::applyTripFilter,
+                    onClearFilter = viewModel::clearTripFilter,
                     onClearError = viewModel::clearError,
                     onRetry = viewModel::retryLocalRecords,
                 )

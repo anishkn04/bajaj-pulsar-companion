@@ -62,6 +62,14 @@ class SqliteTripRepository(
 
     override suspend fun getTrips(vin: String, limit: Int, offset: Int): List<Trip> = db.getTripsForVin(vin, limit, offset)
 
+    override suspend fun getTripsBetween(
+        vin: String,
+        fromMillis: Long?,
+        toMillis: Long?,
+        limit: Int,
+        offset: Int,
+    ): List<Trip> = db.getTripsBetweenForVin(vin, fromMillis, toMillis, limit, offset)
+
     override suspend fun totalDistanceKm(vin: String): Double = db.totalDistanceForVin(vin)
 
     override suspend fun completedTripsBetween(vin: String, fromMillis: Long, toMillis: Long): Int {

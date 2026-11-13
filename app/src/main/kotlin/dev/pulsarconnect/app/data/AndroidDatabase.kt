@@ -93,6 +93,36 @@ class AndroidDatabase(
             )
         }
 
+        override suspend fun getTripsBetween(
+            vin: String,
+            fromMillis: Long?,
+            toMillis: Long?,
+            limit: Int,
+            offset: Int,
+        ): List<Trip> = access { db ->
+            require(limit >= 0 && offset >= 0) { "Limit and offset must be nonnegative" }
+            require(fromMillis == null || toMillis == null || fromMillis <= toMillis) {
+                "Date range must not be reversed"
+            }
+            val conditions = mutableListOf("vin = ?")
+            val args = mutableListOf(vin)
+            fromMillis?.let {
+                conditions += "start_time >= ?"
+                args += it.toString()
+            }
+            toMillis?.let {
+                conditions += "start_time < ?"
+                args += it.toString()
+            }
+            args += limit.toString()
+            args += offset.toString()
+            db.query(
+                "SELECT * FROM trip WHERE ${conditions.joinToString(" AND ")} " +
+                    "ORDER BY start_time DESC, id DESC LIMIT ? OFFSET ?",
+                args.toTypedArray(), Cursor::trip,
+            )
+        }
+
         override suspend fun totalDistanceKm(vin: String): Double = access { db ->
             db.query(
                 "SELECT COALESCE(SUM(distance_km), 0) AS total FROM trip WHERE vin = ?",

@@ -335,6 +335,40 @@ class Database private constructor(
         }
     }
 
+    suspend fun getTripsBetweenForVin(
+        vin: String,
+        fromMillis: Long?,
+        toMillis: Long?,
+        limit: Int,
+        offset: Int,
+    ): List<Trip> = withContext(Dispatchers.IO) {
+        require(limit >= 0 && offset >= 0) { "Limit and offset must be nonnegative" }
+        require(fromMillis == null || toMillis == null || fromMillis <= toMillis) {
+            "Date range must not be reversed"
+        }
+        dataSource.connection.use { conn ->
+            val conditions = mutableListOf("vin = ?")
+            if (fromMillis != null) conditions += "start_time >= ?"
+            if (toMillis != null) conditions += "start_time < ?"
+            conn.prepareStatement(
+                "SELECT * FROM trip WHERE ${conditions.joinToString(" AND ")} " +
+                    "ORDER BY start_time DESC, id DESC LIMIT ? OFFSET ?",
+            ).use { stmt ->
+                var index = 1
+                stmt.setString(index++, vin)
+                fromMillis?.let { stmt.setLong(index++, it) }
+                toMillis?.let { stmt.setLong(index++, it) }
+                stmt.setInt(index++, limit)
+                stmt.setInt(index, offset)
+                stmt.executeQuery().use { rs ->
+                    val list = mutableListOf<Trip>()
+                    while (rs.next()) list.add(mapTrip(rs))
+                    list
+                }
+            }
+        }
+    }
+
     suspend fun totalDistanceForVin(vin: String): Double = withContext(Dispatchers.IO) {
         dataSource.connection.use { conn ->
             conn.prepareStatement("SELECT COALESCE(SUM(distance_km), 0) AS total FROM trip WHERE vin = ?").use { stmt ->

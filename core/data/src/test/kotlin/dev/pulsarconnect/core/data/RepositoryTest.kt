@@ -153,6 +153,38 @@ class RepositoryTest {
     }
 
     @Test
+    fun `filtered trip pages apply date bounds before limit and offset`() = runTest {
+        val vin = "MD2ABCDEFGH123456"
+        val base = 1_000_000L
+        val day = 86_400_000L
+        val starts = (0 until 5).map { base + it * day }
+        starts.forEachIndexed { index, start ->
+            now = start
+            val trip = tripRepo.startTrip(vin, index * 10.0, null, null)
+            now = start + 1_000
+            tripRepo.endTrip(trip, index * 10.0 + 5.0, null, null)
+        }
+
+        val from = starts[1]
+        val to = starts[4]
+        assertEquals(
+            listOf(starts[3], starts[2]),
+            tripRepo.getTripsBetween(vin, from, to, 2, 0).map { it.startTime },
+        )
+        assertEquals(
+            listOf(starts[1]),
+            tripRepo.getTripsBetween(vin, from, to, 2, 2).map { it.startTime },
+        )
+        assertEquals(
+            listOf(starts[4], starts[3]),
+            tripRepo.getTripsBetween(vin, starts[3], null, 10, 0).map { it.startTime },
+        )
+        assertEquals(5, tripRepo.getTripsBetween(vin, null, null, 10, 0).size)
+        val reversed = runCatching { tripRepo.getTripsBetween(vin, to, from, 10, 0) }.exceptionOrNull()
+        assertTrue(reversed is IllegalArgumentException, reversed?.message)
+    }
+
+    @Test
     fun `manual odometer readings are monotonic per bike`() = runTest {
         val store = InMemoryOdometerRepository()
         val vin = "MD2ABCDEFGH123456"

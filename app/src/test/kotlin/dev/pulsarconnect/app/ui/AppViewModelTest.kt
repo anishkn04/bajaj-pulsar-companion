@@ -13,6 +13,7 @@ import dev.pulsarconnect.core.model.Credentials
 import dev.pulsarconnect.core.model.ServiceReminder
 import dev.pulsarconnect.core.model.Session
 import dev.pulsarconnect.core.model.StoredSession
+import dev.pulsarconnect.core.model.Trip
 import dev.pulsarconnect.core.model.Vin
 import dev.pulsarconnect.core.network.BajajApi
 import dev.pulsarconnect.core.network.BajajSessionManager
@@ -299,6 +300,73 @@ class AppViewModelTest {
         assertTrue(signedIn(vm).trips.all { it.vin == vin })
     }
 
+    @Test fun `date filter pages within the range and keeps the applied bounds`() = runTest(dispatcher) {
+        cacheBike()
+        suspend fun seedTrip(start: Instant, odometer: Double) {
+            now = start.toEpochMilli()
+            val trip = trips.startTrip(vin, odometer, null, null)
+            now += 1_800_000
+            trips.endTrip(trip, odometer + 5.0, null, null)
+        }
+        seedTrip(Instant.parse("2026-09-20T10:00:00Z"), 1.0)
+        seedTrip(Instant.parse("2026-11-05T10:00:00Z"), 2.0)
+        repeat(25) { index ->
+            seedTrip(Instant.parse("2026-10-15T00:00:00Z").plusSeconds(index * 3_600L), 10.0 + index)
+        }
+        val vm = viewModel()
+        advanceUntilIdle()
+        assertEquals(20, signedIn(vm).trips.size)
+        assertTrue(signedIn(vm).hasMoreTrips)
+        assertFalse(signedIn(vm).localLoadFailed)
+
+        vm.applyTripFilter("2026-10-01", "2026-10-31")
+        advanceUntilIdle()
+        var state = signedIn(vm)
+        val octoberFrom = Instant.parse("2026-10-01T00:00:00Z").toEpochMilli()
+        val octoberTo = Instant.parse("2026-11-01T00:00:00Z").toEpochMilli()
+        assertEquals(octoberFrom, state.tripFilterFrom)
+        assertEquals(octoberTo, state.tripFilterTo)
+        assertEquals(20, state.trips.size)
+        assertTrue(state.hasMoreTrips)
+        assertTrue(state.trips.all { it.startTime >= octoberFrom && it.startTime < octoberTo })
+
+        vm.loadMoreTrips()
+        advanceUntilIdle()
+        state = signedIn(vm)
+        assertEquals(25, state.trips.size)
+        assertFalse(state.hasMoreTrips)
+        assertTrue(state.trips.all { it.startTime >= octoberFrom && it.startTime < octoberTo })
+
+        // An inclusive To date covers the whole day and leaves the lower bound open, so the
+        // 24 trips on 15 October plus the September trip remain.
+        vm.applyTripFilter("", "2026-10-15")
+        advanceUntilIdle()
+        state = signedIn(vm)
+        assertNull(state.tripFilterFrom)
+        assertEquals(Instant.parse("2026-10-16T00:00:00Z").toEpochMilli(), state.tripFilterTo)
+        assertEquals(20, state.trips.size)
+        assertTrue(state.hasMoreTrips)
+        vm.loadMoreTrips()
+        advanceUntilIdle()
+        assertEquals(25, signedIn(vm).trips.size)
+        assertFalse(signedIn(vm).hasMoreTrips)
+
+        vm.applyTripFilter("2026-11-01", "2026-10-01")
+        advanceUntilIdle()
+        state = signedIn(vm)
+        assertTrue(state.error!!.contains("From date"))
+        assertNull(state.tripFilterFrom)
+        assertEquals(25, state.trips.size)
+
+        vm.clearTripFilter()
+        advanceUntilIdle()
+        state = signedIn(vm)
+        assertNull(state.tripFilterFrom)
+        assertNull(state.tripFilterTo)
+        assertEquals(20, state.trips.size)
+        assertTrue(state.hasMoreTrips)
+    }
+
     @Test fun `home stats cover the whole local history for the signed in bike`() = runTest(dispatcher) {
         now = Instant.parse("2026-10-05T09:00:00Z").toEpochMilli()
         val october = trips.startTrip(vin, 10.0, null, null)
@@ -463,8 +531,17 @@ class AppViewModelTest {
     @Test fun `saved mutation with failed reload cannot be repeated before read only retry`() = runTest(dispatcher) {
         var failReads = false
         val unreliable = object : TripRepository by trips {
-            override suspend fun getTrips(vin: String, limit: Int, offset: Int) =
-                if (failReads) throw IOException("temporary read failure") else trips.getTrips(vin, limit, offset)
+            override suspend fun getTripsBetween(
+                vin: String,
+                fromMillis: Long?,
+                toMillis: Long?,
+                limit: Int,
+                offset: Int,
+            ) = if (failReads) {
+                throw IOException("temporary read failure")
+            } else {
+                trips.getTripsBetween(vin, fromMillis, toMillis, limit, offset)
+            }
         }
         val vm = viewModel(tripRepository = unreliable)
         advanceUntilIdle()
@@ -506,7 +583,13 @@ class AppViewModelTest {
 
     @Test fun `local storage failure leaves usable signed in screen with error`() = runTest(dispatcher) {
         val failing = object : TripRepository by trips {
-            override suspend fun getTrips(vin: String, limit: Int, offset: Int) = throw IOException("disk failed")
+            override suspend fun getTripsBetween(
+                vin: String,
+                fromMillis: Long?,
+                toMillis: Long?,
+                limit: Int,
+                offset: Int,
+            ): List<Trip> = throw IOException("disk failed")
         }
         val vm = viewModel(tripRepository = failing)
         advanceUntilIdle()

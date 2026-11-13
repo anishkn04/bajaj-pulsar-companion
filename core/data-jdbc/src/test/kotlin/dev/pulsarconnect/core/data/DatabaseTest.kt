@@ -311,6 +311,31 @@ class DatabaseTest {
     }
 
     @Test
+    fun `filtered pages apply the date range before limit and offset`() = runTest {
+        val base = 1_000_000L
+        fun trip(start: Long, vin: String = "VIN") = Trip(
+            vin = vin, startTime = start, endTime = start + 1_000, startOdometer = 100.0,
+            endOdometer = 105.0, distanceKm = 5.0,
+            avgSpeedKmph = null, maxSpeedKmph = null, fuelUsedLiters = null,
+            startLat = null, startLon = null, endLat = null, endLon = null,
+        )
+        val starts = (0 until 5).map { base + it * 1_000 }
+        starts.forEach { db.insertTrip(trip(it)) }
+        db.insertTrip(trip(base + 2_000, vin = "MD2ABCDEFGH123456"))
+
+        val trips = SqliteTripRepository(db) { base }
+        val from = starts[1]
+        val to = starts[4]
+        assertEquals(starts.reversed(), trips.getTripsBetween("VIN", null, null, 10, 0).map { it.startTime })
+        assertEquals(listOf(starts[3], starts[2]), trips.getTripsBetween("VIN", from, to, 2, 0).map { it.startTime })
+        assertEquals(listOf(starts[1]), trips.getTripsBetween("VIN", from, to, 2, 2).map { it.startTime })
+        assertEquals(listOf(starts[4], starts[3]), trips.getTripsBetween("VIN", starts[3], null, 2, 0).map { it.startTime })
+        assertEquals(listOf(starts[3], starts[2]), trips.getTripsBetween("VIN", null, to, 2, 0).map { it.startTime })
+        val reversed = runCatching { trips.getTripsBetween("VIN", to, from, 10, 0) }.exceptionOrNull()
+        assertTrue(reversed is IllegalArgumentException, reversed?.message)
+    }
+
+    @Test
     fun `odometer repository is monotonic scoped and usable for reminder due states`() = runTest {
         db.upsertBike(BikeProfile("VIN", null, null, null, null))
         db.upsertBike(BikeProfile("OTHER", null, null, null, null))
