@@ -16,6 +16,7 @@ activityCompose = "1.10.1"
 lifecycle = "2.9.0"
 desugar = "2.1.5"
 work = "2.10.1"
+biometric = "1.1.0"
 
 [libraries]
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
@@ -45,6 +46,7 @@ androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-
 android-desugar = { module = "com.android.tools:desugar_jdk_libs", version.ref = "desugar" }
 androidx-work-runtime = { module = "androidx.work:work-runtime-ktx", version.ref = "work" }
 androidx-work-testing = { module = "androidx.work:work-testing", version.ref = "work" }
+androidx-biometric = { module = "androidx.biometric:biometric", version.ref = "biometric" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }

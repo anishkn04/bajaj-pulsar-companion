@@ -46,6 +46,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.pulsarconnect.app.ble.BleUiState
 import dev.pulsarconnect.app.ble.BleViewModel
+import dev.pulsarconnect.app.security.AppLockSettings
 import dev.pulsarconnect.app.ui.theme.ThemeMode
 import dev.pulsarconnect.app.ui.theme.ThemeSettings
 import dev.pulsarconnect.core.ble.BleFailure
@@ -59,6 +60,8 @@ fun PulsarConnectApp(
     themeSettings: ThemeSettings,
     onThemeModeChange: (ThemeMode) -> Unit,
     onDynamicColorChange: (Boolean) -> Unit,
+    appLockSettings: AppLockSettings,
+    onAppLockChange: (Boolean) -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
@@ -82,6 +85,7 @@ fun PulsarConnectApp(
             is UiState.SignedIn -> SignedInScreen(
                 current, viewModel, bleViewModel,
                 themeSettings, onThemeModeChange, onDynamicColorChange,
+                appLockSettings, onAppLockChange,
             )
         }
     }
@@ -111,6 +115,8 @@ private fun SignedInScreen(
     themeSettings: ThemeSettings,
     onThemeModeChange: (ThemeMode) -> Unit,
     onDynamicColorChange: (Boolean) -> Unit,
+    appLockSettings: AppLockSettings,
+    onAppLockChange: (Boolean) -> Unit,
 ) {
     val bleState by bleViewModel.state.collectAsStateWithLifecycle()
     var navDestination by rememberSaveable(state.vin) { mutableStateOf(NavDestination.HOME) }
@@ -184,95 +190,103 @@ private fun SignedInScreen(
         navDestination = NavDestination.HOME
     }
 
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        bottomBar = {
-            PulsarNavigationBar(
-                selected = navDestination,
-                onSelected = { navDestination = it },
-            )
-        },
-    ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .consumeWindowInsets(innerPadding),
-        ) {
-            when (navDestination) {
-                NavDestination.TRIPS -> TripHistoryScreen(
-                    state = state,
-                    onStartTrip = viewModel::startTrip,
-                    onEndTrip = viewModel::endTrip,
-                    onEditTrip = viewModel::updateTripOdometer,
-                    onDeleteTrip = viewModel::deleteTrip,
-                    onLoadMore = viewModel::loadMoreTrips,
-                    onApplyFilter = viewModel::applyTripFilter,
-                    onClearFilter = viewModel::clearTripFilter,
-                    onClearError = viewModel::clearError,
-                    onRetry = viewModel::retryLocalRecords,
+    AppLockGate(
+        enabled = appLockSettings.requireBiometric,
+        resetKey = state.vin,
+        onDisable = { onAppLockChange(false) },
+    ) {
+        Scaffold(
+            containerColor = MaterialTheme.colorScheme.background,
+            snackbarHost = { SnackbarHost(snackbarHostState) },
+            bottomBar = {
+                PulsarNavigationBar(
+                    selected = navDestination,
+                    onSelected = { navDestination = it },
                 )
-                NavDestination.REMINDERS -> RemindersScreen(
-                    state = state,
-                    onAddReminder = viewModel::addReminder,
-                    onEditReminder = viewModel::updateReminder,
-                    onDeleteReminder = viewModel::deleteReminder,
-                    onSnoozeReminder = viewModel::snoozeReminder,
-                    onReopenReminder = viewModel::reopenReminder,
-                    onCompleteReminder = viewModel::completeReminder,
-                    onClearError = viewModel::clearError,
-                    onRetry = viewModel::retryLocalRecords,
-                    onNotificationsEnabledChange = viewModel::setReminderNotificationsEnabled,
-                    onNotificationsRefresh = viewModel::refreshReminderNotifications,
-                )
-                NavDestination.BIKE -> BikeConnectionScreen(
-                    bleState = bleState,
-                    onScan = bleViewModel::scan,
-                    onSelect = bleViewModel::select,
-                    onConnect = bleViewModel::connect,
-                    onDisconnect = bleViewModel::disconnect,
-                    onRetry = bleViewModel::retry,
-                    onAutoConnectChange = bleViewModel::setAutoConnect,
-                    onClearSelection = bleViewModel::clearSelection,
-                    onPhoneStatusChange = bleViewModel::setMirroring,
-                    onCallerNameChange = bleViewModel::setMirrorCallerName,
-                    onMissedCallChange = bleViewModel::setMirrorMissedCalls,
-                    onOpenNotificationSettings = {
-                        openNotificationAccessSettings(context)
-                    },
-                    onRefresh = bleViewModel::onPermissionsChanged,
-                    onClearError = bleViewModel::clearError,
-                )
-                NavDestination.SETTINGS -> SettingsScreen(
-                    bleState = bleState,
-                    backupBusy = state.busy,
-                    themeSettings = themeSettings,
-                    onThemeModeChange = onThemeModeChange,
-                    onDynamicColorChange = onDynamicColorChange,
-                    onMirroringChange = bleViewModel::setMirroring,
-                    onBackgroundChange = bleViewModel::setKeepInBackground,
-                    onBootChange = bleViewModel::setStartOnBoot,
-                    onStopMirroring = { bleViewModel.disconnect(); navDestination = NavDestination.HOME },
-                    onExportBackup = viewModel::exportBackup,
-                    onRestoreBackup = viewModel::restoreBackup,
-                    onReportError = viewModel::reportError,
-                    onOpenBatteryOptimization = {
-                        openBatteryOptimizationSettings(context)
-                    },
-                )
-                else -> HomeScreen(
-                    state = state,
-                    bleState = bleState,
-                    onSignOut = viewModel::signOut,
-                    onTrips = { navDestination = NavDestination.TRIPS },
-                    onReminders = { navDestination = NavDestination.REMINDERS },
-                    onBike = { navDestination = NavDestination.BIKE },
-                    onSettings = { navDestination = NavDestination.SETTINGS },
-                    onClearError = viewModel::clearError,
-                    onRetry = viewModel::retryLocalRecords,
-                    onUpdateOdometer = viewModel::updateOdometer,
-                )
+            },
+        ) { innerPadding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .consumeWindowInsets(innerPadding),
+            ) {
+                when (navDestination) {
+                    NavDestination.TRIPS -> TripHistoryScreen(
+                        state = state,
+                        onStartTrip = viewModel::startTrip,
+                        onEndTrip = viewModel::endTrip,
+                        onEditTrip = viewModel::updateTripOdometer,
+                        onDeleteTrip = viewModel::deleteTrip,
+                        onLoadMore = viewModel::loadMoreTrips,
+                        onApplyFilter = viewModel::applyTripFilter,
+                        onClearFilter = viewModel::clearTripFilter,
+                        onClearError = viewModel::clearError,
+                        onRetry = viewModel::retryLocalRecords,
+                    )
+                    NavDestination.REMINDERS -> RemindersScreen(
+                        state = state,
+                        onAddReminder = viewModel::addReminder,
+                        onEditReminder = viewModel::updateReminder,
+                        onDeleteReminder = viewModel::deleteReminder,
+                        onSnoozeReminder = viewModel::snoozeReminder,
+                        onReopenReminder = viewModel::reopenReminder,
+                        onCompleteReminder = viewModel::completeReminder,
+                        onClearError = viewModel::clearError,
+                        onRetry = viewModel::retryLocalRecords,
+                        onNotificationsEnabledChange = viewModel::setReminderNotificationsEnabled,
+                        onNotificationsRefresh = viewModel::refreshReminderNotifications,
+                    )
+                    NavDestination.BIKE -> BikeConnectionScreen(
+                        bleState = bleState,
+                        onScan = bleViewModel::scan,
+                        onSelect = bleViewModel::select,
+                        onConnect = bleViewModel::connect,
+                        onDisconnect = bleViewModel::disconnect,
+                        onRetry = bleViewModel::retry,
+                        onAutoConnectChange = bleViewModel::setAutoConnect,
+                        onClearSelection = bleViewModel::clearSelection,
+                        onPhoneStatusChange = bleViewModel::setMirroring,
+                        onCallerNameChange = bleViewModel::setMirrorCallerName,
+                        onMissedCallChange = bleViewModel::setMirrorMissedCalls,
+                        onOpenNotificationSettings = {
+                            openNotificationAccessSettings(context)
+                        },
+                        onRefresh = bleViewModel::onPermissionsChanged,
+                        onClearError = bleViewModel::clearError,
+                    )
+                    NavDestination.SETTINGS -> SettingsScreen(
+                        bleState = bleState,
+                        backupBusy = state.busy,
+                        themeSettings = themeSettings,
+                        onThemeModeChange = onThemeModeChange,
+                        onDynamicColorChange = onDynamicColorChange,
+                        appLockSettings = appLockSettings,
+                        onAppLockChange = onAppLockChange,
+                        onMirroringChange = bleViewModel::setMirroring,
+                        onBackgroundChange = bleViewModel::setKeepInBackground,
+                        onBootChange = bleViewModel::setStartOnBoot,
+                        onStopMirroring = { bleViewModel.disconnect(); navDestination = NavDestination.HOME },
+                        onExportBackup = viewModel::exportBackup,
+                        onRestoreBackup = viewModel::restoreBackup,
+                        onReportError = viewModel::reportError,
+                        onOpenBatteryOptimization = {
+                            openBatteryOptimizationSettings(context)
+                        },
+                    )
+                    else -> HomeScreen(
+                        state = state,
+                        bleState = bleState,
+                        onSignOut = viewModel::signOut,
+                        onTrips = { navDestination = NavDestination.TRIPS },
+                        onReminders = { navDestination = NavDestination.REMINDERS },
+                        onBike = { navDestination = NavDestination.BIKE },
+                        onSettings = { navDestination = NavDestination.SETTINGS },
+                        onClearError = viewModel::clearError,
+                        onRetry = viewModel::retryLocalRecords,
+                        onUpdateOdometer = viewModel::updateOdometer,
+                    )
+                }
             }
         }
     }

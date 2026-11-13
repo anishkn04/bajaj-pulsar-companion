@@ -133,7 +133,7 @@ The Android app depends on `core/data`, **not** `core/data-jdbc`. Desktop SQLite
 
 ## Privacy and sign-out
 
-Credentials and bearer tokens are encrypted. Bike profiles, trip data, telemetry and reminders are **not separately database-encrypted**; they rely on Android's application sandbox and device storage protection. There is no in-app lock.
+Credentials and bearer tokens are encrypted. Bike profiles, trip data, telemetry and reminders are **not separately database-encrypted**; they rely on Android's application sandbox and device storage protection. An optional biometric app lock hides the signed-in UI after the app has been in the background, but it is UI gating only, not encryption at rest.
 
 Signing out removes saved credentials and tokens but **retains local records per VIN**. Signing back into that VIN shows them again. Clearing app storage or uninstalling removes the local database; there is no export/backup workflow yet. Do not rely on this research app as your only copy of service history.
 

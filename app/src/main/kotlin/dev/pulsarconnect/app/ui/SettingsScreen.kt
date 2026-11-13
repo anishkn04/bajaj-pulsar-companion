@@ -16,6 +16,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -25,7 +26,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.pulsarconnect.app.ble.BleUiState
+import dev.pulsarconnect.app.security.AppLockSettings
+import dev.pulsarconnect.app.security.BiometricStatus
+import dev.pulsarconnect.app.security.checkBiometricStatus
 import dev.pulsarconnect.app.ui.theme.ThemeMode
 import dev.pulsarconnect.app.ui.theme.ThemeSettings
 import dev.pulsarconnect.core.data.LocalBackup
@@ -43,6 +50,8 @@ internal fun SettingsScreen(
     themeSettings: ThemeSettings,
     onThemeModeChange: (ThemeMode) -> Unit,
     onDynamicColorChange: (Boolean) -> Unit,
+    appLockSettings: AppLockSettings,
+    onAppLockChange: (Boolean) -> Unit,
     onMirroringChange: (Boolean) -> Unit,
     onBackgroundChange: (Boolean) -> Unit,
     onBootChange: (Boolean) -> Unit,
@@ -54,6 +63,18 @@ internal fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val notificationGranted = notificationPermissionGranted(context)
+
+    var biometricStatus by remember { mutableStateOf(checkBiometricStatus(context)) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                biometricStatus = checkBiometricStatus(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     var redactVin by rememberSaveable { mutableStateOf(false) }
     var redactForPendingExport by remember { mutableStateOf(false) }
@@ -148,6 +169,32 @@ internal fun SettingsScreen(
                 checked = themeSettings.dynamicColor,
                 onCheckedChange = onDynamicColorChange,
                 enabled = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S,
+            )
+        }
+
+        SectionCard(title = "App lock") {
+            PulsarSwitchRow(
+                title = "Require biometrics to open",
+                description = when (biometricStatus) {
+                    BiometricStatus.AVAILABLE ->
+                        "Ask for your fingerprint or face after the app has been in the background."
+                    BiometricStatus.NOT_ENROLLED ->
+                        "Add a fingerprint or face unlock in system settings first."
+                    BiometricStatus.NO_HARDWARE -> "This phone has no biometric sensor."
+                    BiometricStatus.TEMPORARILY_UNAVAILABLE ->
+                        "Biometrics are unavailable right now. Try again later."
+                    BiometricStatus.UNKNOWN -> "Biometric unlock is not available on this phone."
+                },
+                checked = appLockSettings.requireBiometric,
+                onCheckedChange = onAppLockChange,
+                enabled = biometricStatus == BiometricStatus.AVAILABLE ||
+                    appLockSettings.requireBiometric,
+            )
+            Text(
+                "App lock hides this screen only. Your local database is still not separately " +
+                    "encrypted, so someone with access to this phone's storage could read it.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
 

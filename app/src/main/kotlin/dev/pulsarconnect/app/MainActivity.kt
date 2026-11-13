@@ -2,7 +2,6 @@ package dev.pulsarconnect.app
 
 import android.graphics.Color
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -10,14 +9,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.pulsarconnect.app.ble.BleViewModel
+import dev.pulsarconnect.app.security.AppLockSettings
+import dev.pulsarconnect.app.security.AppLockSettingsStore
 import dev.pulsarconnect.app.ui.AppViewModel
 import dev.pulsarconnect.app.ui.PulsarConnectApp
 import dev.pulsarconnect.app.ui.theme.PulsarTheme
 import dev.pulsarconnect.app.ui.theme.ThemeSettingsStore
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -28,9 +30,11 @@ class MainActivity : ComponentActivity() {
 
         val container = (application as PulsarConnectApplication).container
         val themeStore = ThemeSettingsStore(this)
+        val appLockStore = AppLockSettingsStore(this)
 
         setContent {
             var themeSettings by remember { mutableStateOf(themeStore.load()) }
+            var appLockSettings by remember { mutableStateOf(appLockStore.load()) }
             PulsarTheme(themeSettings) {
                 val viewModel: AppViewModel = viewModel(
                     factory = AppViewModel.factory(container),
@@ -47,6 +51,11 @@ class MainActivity : ComponentActivity() {
                     },
                     onDynamicColorChange = { enabled ->
                         themeSettings = themeSettings.copy(dynamicColor = enabled).also(themeStore::save)
+                    },
+                    appLockSettings = appLockSettings,
+                    onAppLockChange = { enabled ->
+                        appLockSettings = AppLockSettings(requireBiometric = enabled)
+                            .also(appLockStore::save)
                     },
                 )
             }
