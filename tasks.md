@@ -131,7 +131,7 @@ already riding. Make health and failures visible without opening the app.
 - [x] **PC-20 — Theme options.** (`63e123e`)
   Light / dark / system plus dynamic color. Acceptance: preference persists across restarts.
 
-- [ ] **PC-21 — Optional biometric app lock.**
+- [x] **PC-21 — Optional biometric app lock.** (`12edc8b`)
   Gate the signed-in UI behind device biometrics when enabled. Document clearly that the local
   database is still not separately encrypted; this is UI gating, not encryption at rest.
 
