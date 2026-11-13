@@ -46,12 +46,20 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.pulsarconnect.app.ble.BleUiState
 import dev.pulsarconnect.app.ble.BleViewModel
+import dev.pulsarconnect.app.ui.theme.ThemeMode
+import dev.pulsarconnect.app.ui.theme.ThemeSettings
 import dev.pulsarconnect.core.ble.BleFailure
 import dev.pulsarconnect.core.ble.ConnectionState
 import dev.pulsarconnect.core.data.isDue
 
 @Composable
-fun PulsarConnectApp(viewModel: AppViewModel, bleViewModel: BleViewModel) {
+fun PulsarConnectApp(
+    viewModel: AppViewModel,
+    bleViewModel: BleViewModel,
+    themeSettings: ThemeSettings,
+    onThemeModeChange: (ThemeMode) -> Unit,
+    onDynamicColorChange: (Boolean) -> Unit,
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
     LaunchedEffect(state) {
@@ -71,7 +79,10 @@ fun PulsarConnectApp(viewModel: AppViewModel, bleViewModel: BleViewModel) {
                 busy = current.busy,
                 onSignIn = viewModel::signIn,
             )
-            is UiState.SignedIn -> SignedInScreen(current, viewModel, bleViewModel)
+            is UiState.SignedIn -> SignedInScreen(
+                current, viewModel, bleViewModel,
+                themeSettings, onThemeModeChange, onDynamicColorChange,
+            )
         }
     }
 }
@@ -97,6 +108,9 @@ private fun SignedInScreen(
     state: UiState.SignedIn,
     viewModel: AppViewModel,
     bleViewModel: BleViewModel,
+    themeSettings: ThemeSettings,
+    onThemeModeChange: (ThemeMode) -> Unit,
+    onDynamicColorChange: (Boolean) -> Unit,
 ) {
     val bleState by bleViewModel.state.collectAsStateWithLifecycle()
     var navDestination by rememberSaveable(state.vin) { mutableStateOf(NavDestination.HOME) }
@@ -233,6 +247,9 @@ private fun SignedInScreen(
                 NavDestination.SETTINGS -> SettingsScreen(
                     bleState = bleState,
                     backupBusy = state.busy,
+                    themeSettings = themeSettings,
+                    onThemeModeChange = onThemeModeChange,
+                    onDynamicColorChange = onDynamicColorChange,
                     onMirroringChange = bleViewModel::setMirroring,
                     onBackgroundChange = bleViewModel::setKeepInBackground,
                     onBootChange = bleViewModel::setStartOnBoot,

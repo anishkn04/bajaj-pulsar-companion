@@ -1,11 +1,13 @@
 package dev.pulsarconnect.app.ui
 
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -24,6 +26,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import dev.pulsarconnect.app.ble.BleUiState
+import dev.pulsarconnect.app.ui.theme.ThemeMode
+import dev.pulsarconnect.app.ui.theme.ThemeSettings
 import dev.pulsarconnect.core.data.LocalBackup
 import dev.pulsarconnect.core.data.LocalBackupCodec
 import dev.pulsarconnect.core.data.RestoreMode
@@ -36,6 +40,9 @@ import kotlinx.coroutines.withContext
 internal fun SettingsScreen(
     bleState: BleUiState,
     backupBusy: Boolean,
+    themeSettings: ThemeSettings,
+    onThemeModeChange: (ThemeMode) -> Unit,
+    onDynamicColorChange: (Boolean) -> Unit,
     onMirroringChange: (Boolean) -> Unit,
     onBackgroundChange: (Boolean) -> Unit,
     onBootChange: (Boolean) -> Unit,
@@ -105,6 +112,44 @@ internal fun SettingsScreen(
         ScreenHeader(
             title = "Settings",
         )
+
+        SectionCard(title = "Appearance") {
+            Text(
+                "System follows this phone's light or dark setting. Your choice is remembered " +
+                    "after the app restarts and sign-out.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                ThemeMode.entries.forEach { mode ->
+                    PillButton(
+                        label = when (mode) {
+                            ThemeMode.SYSTEM -> "System"
+                            ThemeMode.LIGHT -> "Light"
+                            ThemeMode.DARK -> "Dark"
+                        },
+                        onClick = { onThemeModeChange(mode) },
+                        modifier = Modifier.weight(1f),
+                        style = if (mode == themeSettings.mode) PillStyle.Filled else PillStyle.Outlined,
+                    )
+                }
+            }
+            PulsarDivider()
+            PulsarSwitchRow(
+                title = "Use system accent colors",
+                description = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    "Match the wallpaper palette on Android 12 and newer."
+                } else {
+                    "Available on Android 12 and newer; this phone keeps Pulsar colors."
+                },
+                checked = themeSettings.dynamicColor,
+                onCheckedChange = onDynamicColorChange,
+                enabled = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S,
+            )
+        }
 
         SectionCard(title = "Bike link mirroring") {
             PulsarSwitchRow(
