@@ -120,7 +120,7 @@ already riding. Make health and failures visible without opening the app.
   Total distance, trips this month, and next due reminder. Acceptance: values come from local
   records for the signed-in VIN only.
 
-- [ ] **PC-18 — Quick odometer update.**
+- [x] **PC-18 — Quick odometer update.** (`776f8be`)
   Update the latest recorded odometer without starting a trip. Acceptance: updates due-status
   inputs and schedules the existing reminder check.
 
