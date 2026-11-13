@@ -124,7 +124,7 @@ already riding. Make health and failures visible without opening the app.
   Update the latest recorded odometer without starting a trip. Acceptance: updates due-status
   inputs and schedules the existing reminder check.
 
-- [ ] **PC-19 — Trip search and filtering.**
+- [x] **PC-19 — Trip search and filtering.** (`379db40`)
   Filter by date range and group by month. Acceptance: filtering works with pagination and does
   not load the entire history into memory.
 
