@@ -151,4 +151,38 @@ class RepositoryTest {
         assertEquals(t2.id, trips[1].id)
         assertEquals(t1.id, trips[2].id)
     }
+
+    @Test
+    fun `manual odometer readings are monotonic per bike`() = runTest {
+        val store = InMemoryOdometerRepository()
+        val vin = "MD2ABCDEFGH123456"
+
+        assertNull(store.getLatest(vin))
+        store.setReading(vin, 1_200.0, 5)
+        assertEquals(1_200.0, store.getLatest(vin)!!.odometerKm, 0.0)
+        val failure = runCatching { store.setReading(vin, 1_199.0, 6) }.exceptionOrNull()
+        assertTrue(failure is IllegalArgumentException, failure?.message)
+        assertEquals(1_200.0, store.getLatest(vin)!!.odometerKm, 0.0)
+        store.setReading("MD2ABCDEFGH654321", 10.0, 7)
+        assertEquals(10.0, store.getLatest("MD2ABCDEFGH654321")!!.odometerKm, 0.0)
+    }
+
+    @Test
+    fun `latest odometer uses the highest of a manual reading and trip history`() = runTest {
+        val vin = "MD2ABCDEFGH123456"
+        val odometers = InMemoryOdometerRepository()
+
+        assertNull(latestOdometerKm(vin, tripRepo, odometers))
+        val trip = tripRepo.startTrip(vin, 1_000.0, null, null)
+        assertEquals(1_000.0, latestOdometerKm(vin, tripRepo, odometers)!!, 0.0)
+
+        odometers.setReading(vin, 900.0, 1)
+        assertEquals(1_000.0, latestOdometerKm(vin, tripRepo, odometers)!!, 0.0)
+        odometers.setReading(vin, 1_200.0, 2)
+        assertEquals(1_200.0, latestOdometerKm(vin, tripRepo, odometers)!!, 0.0)
+
+        now += 3_600_000
+        tripRepo.endTrip(trip, 1_500.0, null, null)
+        assertEquals(1_500.0, latestOdometerKm(vin, tripRepo, odometers)!!, 0.0)
+    }
 }

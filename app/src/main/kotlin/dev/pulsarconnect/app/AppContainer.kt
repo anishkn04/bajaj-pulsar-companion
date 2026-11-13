@@ -61,6 +61,7 @@ class AppContainer(context: Context) {
     val sessionManager = BajajSessionManager(api, sessionRepository)
     val reminderNotifications: ReminderNotificationManager = ReminderNotificationManager(
         context.applicationContext, sessionRepository, database.trips, database.reminders,
+        database.odometers,
     )
     /** Lets a notification action tell the open UI to reload reminders. */
     val reminderActions = ReminderActionBus()

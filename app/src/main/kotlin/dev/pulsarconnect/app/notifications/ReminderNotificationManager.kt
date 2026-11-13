@@ -17,8 +17,10 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import dev.pulsarconnect.app.MainActivity
 import dev.pulsarconnect.app.R
+import dev.pulsarconnect.core.data.OdometerRepository
 import dev.pulsarconnect.core.data.ReminderRepository
 import dev.pulsarconnect.core.data.TripRepository
+import dev.pulsarconnect.core.data.latestOdometerKm
 import dev.pulsarconnect.core.session.SessionRepository
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
@@ -29,6 +31,7 @@ class ReminderNotificationManager(
     private val sessionRepository: SessionRepository,
     private val trips: TripRepository,
     private val reminders: ReminderRepository,
+    private val odometers: OdometerRepository,
 ) : ReminderNotificationActions {
     private val context = context.applicationContext
     private val preferences = this.context.getSharedPreferences("service_reminder_notifications", Context.MODE_PRIVATE)
@@ -163,10 +166,7 @@ class ReminderNotificationManager(
         }
         val session = sessionRepository.load() ?: return@withContext
         val vin = session.credentials.vin.value
-        val active = trips.getActiveTrip(vin)
-        val odometer = active?.startOdometer ?: trips.getTrips(vin, 1, 0).firstOrNull()?.let {
-            it.endOdometer ?: it.startOdometer
-        } ?: Double.NaN
+        val odometer = latestOdometerKm(vin, trips, odometers) ?: Double.NaN
         val due = reminders.getDueReminders(vin, odometer, System.currentTimeMillis())
         for (reminder in due) {
             val id = reminder.id ?: continue

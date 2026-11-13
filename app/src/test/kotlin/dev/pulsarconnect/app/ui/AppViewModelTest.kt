@@ -2,6 +2,7 @@ package dev.pulsarconnect.app.ui
 
 import dev.pulsarconnect.app.notifications.ReminderNotificationActions
 import dev.pulsarconnect.core.data.InMemoryBikeRepository
+import dev.pulsarconnect.core.data.InMemoryOdometerRepository
 import dev.pulsarconnect.core.data.InMemoryReminderRepository
 import dev.pulsarconnect.core.data.InMemoryTripRepository
 import dev.pulsarconnect.core.data.REDACTED_VIN
@@ -42,6 +43,7 @@ class AppViewModelTest {
     private val bikes = InMemoryBikeRepository()
     private val trips = InMemoryTripRepository { now }
     private val reminders = InMemoryReminderRepository()
+    private val odometers = InMemoryOdometerRepository()
     private val secrets = object : SecretStore {
         val values = mutableMapOf<String, String>()
         override fun read(key: String) = values[key]
@@ -104,7 +106,7 @@ class AppViewModelTest {
         val api = BajajApi("https://example.invalid")
         return AppViewModel(
             BajajSessionManager(api, sessionRepository), api, bikes, tripRepository, reminders,
-            clock = { now }, zone = ZoneOffset.UTC, ioDispatcher = dispatcher,
+            odometers, clock = { now }, zone = ZoneOffset.UTC, ioDispatcher = dispatcher,
                         notificationActions = notifications, fetchVehicles = fetch,
         )
     }
@@ -216,6 +218,48 @@ class AppViewModelTest {
         assertEquals(40.0, signedIn(restored).trips.single().distanceKm)
         assertEquals(3600L, signedIn(restored).trips.single().durationSeconds)
         assertEquals(1040.0, signedIn(restored).lastOdometer)
+    }
+
+    @Test fun `quick odometer updates due status inputs and schedules the reminder check`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+        vm.addReminder("Oil service", "1000", "")
+        advanceUntilIdle()
+        assertEquals(0, reminderDueCount(signedIn(vm), now))
+        notifications.events.clear()
+
+        vm.updateOdometer("1400")
+        advanceUntilIdle()
+
+        val state = signedIn(vm)
+        assertEquals(1400.0, state.lastOdometer)
+        assertEquals(1, reminderDueCount(state, now))
+        assertEquals(listOf("refresh"), notifications.events)
+        assertEquals(1400.0, odometers.getLatest(vin)!!.odometerKm, 0.0)
+        assertEquals(now, odometers.getLatest(vin)!!.recordedAtMillis)
+        assertTrue(trips.getTrips(vin, 100, 0).isEmpty())
+
+        // A newly opened screen reads the saved reading and the updated due status.
+        val restored = viewModel()
+        advanceUntilIdle()
+        assertEquals(1400.0, signedIn(restored).lastOdometer)
+        assertEquals(1, reminderDueCount(signedIn(restored), now))
+    }
+
+    @Test fun `quick odometer rejects a reading below the latest recorded value`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+        vm.updateOdometer("1400")
+        advanceUntilIdle()
+        notifications.events.clear()
+
+        vm.updateOdometer("1399.9")
+        advanceUntilIdle()
+
+        assertTrue(signedIn(vm).error!!.contains("lower"))
+        assertEquals(1400.0, odometers.getLatest(vin)!!.odometerKm, 0.0)
+        assertEquals(1400.0, signedIn(vm).lastOdometer)
+        assertTrue(notifications.events.isEmpty())
     }
 
     @Test fun `invalid odometers leave stored trips unchanged`() = runTest(dispatcher) {

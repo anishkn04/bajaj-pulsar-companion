@@ -6,6 +6,7 @@ import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import dev.pulsarconnect.core.data.BikeRepository
+import dev.pulsarconnect.core.data.OdometerRepository
 import dev.pulsarconnect.core.data.ReminderRepository
 import dev.pulsarconnect.core.data.TripRepository
 import dev.pulsarconnect.core.data.correctedOdometer
@@ -14,6 +15,7 @@ import dev.pulsarconnect.core.data.nextOccurrence
 import dev.pulsarconnect.core.data.requireValidOdometer
 import dev.pulsarconnect.core.data.requireValidReminder
 import dev.pulsarconnect.core.model.BikeProfile
+import dev.pulsarconnect.core.model.OdometerReading
 import dev.pulsarconnect.core.model.ServiceReminder
 import dev.pulsarconnect.core.model.TelemetryPoint
 import dev.pulsarconnect.core.model.Trip
@@ -164,6 +166,43 @@ class AndroidDatabase(
         }
     }
 
+    val odometers: OdometerRepository = object : OdometerRepository {
+        override suspend fun getLatest(vin: String): OdometerReading? = access { db ->
+            db.query(
+                "SELECT * FROM odometer_reading WHERE vin = ?",
+                arrayOf(vin), Cursor::odometer,
+            ).singleOrNull()
+        }
+
+        override suspend fun setReading(
+            vin: String,
+            odometerKm: Double,
+            recordedAtMillis: Long,
+        ): OdometerReading = access { db ->
+            validateOdometer(odometerKm)
+            db.transaction {
+                requireBike(vin)
+                db.query(
+                    "SELECT * FROM odometer_reading WHERE vin = ?",
+                    arrayOf(vin), Cursor::odometer,
+                ).singleOrNull()?.let { stored ->
+                    require(odometerKm >= stored.odometerKm) {
+                        "New odometer reading must not be lower than the last recorded reading."
+                    }
+                }
+                val fields = values(
+                    "vin" to vin,
+                    "odometer_km" to odometerKm,
+                    "recorded_at_millis" to recordedAtMillis,
+                )
+                if (db.update("odometer_reading", fields, "vin = ?", arrayOf(vin)) == 0) {
+                    db.insertOrThrow("odometer_reading", null, fields)
+                }
+                OdometerReading(vin, odometerKm, recordedAtMillis)
+            }
+        }
+    }
+
     val reminders: ReminderRepository = object : ReminderRepository {
         override suspend fun addReminder(reminder: ServiceReminder): ServiceReminder = access { db ->
             db.transaction {
@@ -277,7 +316,7 @@ class AndroidDatabase(
         }
     }
 
-    private class Helper(context: Context, name: String) : SQLiteOpenHelper(context, name, null, 2) {
+    private class Helper(context: Context, name: String) : SQLiteOpenHelper(context, name, null, 3) {
         init {
             setWriteAheadLoggingEnabled(true)
         }
@@ -328,6 +367,13 @@ class AndroidDatabase(
                 )
             """.trimIndent())
             db.execSQL("CREATE INDEX reminder_vin ON service_reminder(vin)")
+            db.execSQL("""
+                CREATE TABLE odometer_reading (
+                    vin TEXT PRIMARY KEY NOT NULL REFERENCES bike_profile(vin),
+                    odometer_km REAL NOT NULL,
+                    recorded_at_millis INTEGER NOT NULL
+                )
+            """.trimIndent())
         }
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -337,6 +383,16 @@ class AndroidDatabase(
                 db.execSQL("ALTER TABLE service_reminder ADD COLUMN repeat_every_km REAL")
                 db.execSQL("ALTER TABLE service_reminder ADD COLUMN repeat_every_days INTEGER")
                 version = 2
+            }
+            if (version < 3) {
+                db.execSQL("""
+                    CREATE TABLE odometer_reading (
+                        vin TEXT PRIMARY KEY NOT NULL REFERENCES bike_profile(vin),
+                        odometer_km REAL NOT NULL,
+                        recorded_at_millis INTEGER NOT NULL
+                    )
+                """.trimIndent())
+                version = 3
             }
             check(version == newVersion) { "No migration from schema $oldVersion to $newVersion" }
         }
@@ -414,6 +470,12 @@ private fun Cursor.nullableString(name: String): String? = getColumnIndexOrThrow
 private fun Cursor.nullableLong(name: String): Long? = getColumnIndexOrThrow(name).let { if (isNull(it)) null else getLong(it) }
 private fun Cursor.nullableDouble(name: String): Double? = getColumnIndexOrThrow(name).let { if (isNull(it)) null else getDouble(it) }
 private fun Cursor.nullableInt(name: String): Int? = getColumnIndexOrThrow(name).let { if (isNull(it)) null else getInt(it) }
+
+private fun Cursor.odometer(): OdometerReading = OdometerReading(
+    vin = string("vin"),
+    odometerKm = getDouble(getColumnIndexOrThrow("odometer_km")),
+    recordedAtMillis = long("recorded_at_millis"),
+)
 
 private fun Cursor.trip(): Trip = Trip(
     id = long("id"), vin = string("vin"), startTime = long("start_time"), endTime = nullableLong("end_time"),

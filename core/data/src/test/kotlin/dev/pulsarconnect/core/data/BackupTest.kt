@@ -22,7 +22,8 @@ class BackupTest {
         val bikes = InMemoryBikeRepository()
         val trips = InMemoryTripRepository()
         val reminders = InMemoryReminderRepository()
-        val service = LocalBackupService(trips, reminders, bikes)
+        val odometers = InMemoryOdometerRepository()
+        val service = LocalBackupService(trips, reminders, bikes, odometers)
     }
 
     private suspend fun Store.seed(vin: String = "DEV-BIKE-A"): LocalBackup {
@@ -31,6 +32,7 @@ class BackupTest {
         trips.endTrip(trip, 150.0, null, null)
         trips.addTelemetry(trip.id!!, point(trip.id!!))
         reminders.addReminder(reminder(vin))
+        odometers.setReading(vin, 1_234.5, 11)
         return service.export(vin, redactVin = false, exportedAtMillis = 42)
     }
 
@@ -57,6 +59,8 @@ class BackupTest {
         assertEquals(1, decoded.trips.size)
         assertEquals(1, decoded.telemetry.size)
         assertEquals(1, decoded.reminders.size)
+        assertEquals(1_234.5, decoded.odometer!!.odometerKm, 0.0)
+        assertEquals(11, decoded.odometer!!.recordedAtMillis)
     }
 
     @Test
@@ -70,6 +74,7 @@ class BackupTest {
         assertEquals(REDACTED_VIN, redacted.bike.vin)
         assertTrue(redacted.trips.all { it.vin == REDACTED_VIN })
         assertTrue(redacted.reminders.all { it.vin == REDACTED_VIN })
+        assertEquals(REDACTED_VIN, redacted.odometer!!.vin)
         assertFalse(encoded.contains(vin.lowercase()))
         for (secret in listOf(
             "accesscode", "access_token", "usertoken", "user_token", "refreshtoken",
@@ -91,13 +96,13 @@ class BackupTest {
 
         val newer = assertThrows(IllegalArgumentException::class.java) {
             LocalBackupCodec.decode(
-                encoded.replace("\"schemaVersion\": 2", "\"schemaVersion\": 3, \"futureField\": true"),
+                encoded.replace("\"schemaVersion\": 3", "\"schemaVersion\": 4, \"futureField\": true"),
             )
         }
         assertTrue(newer.message!!.contains("newer app version"))
 
         val older = assertThrows(IllegalArgumentException::class.java) {
-            LocalBackupCodec.decode(encoded.replace("\"schemaVersion\": 2", "\"schemaVersion\": 0"))
+            LocalBackupCodec.decode(encoded.replace("\"schemaVersion\": 3", "\"schemaVersion\": 0"))
         }
         assertTrue(older.message!!.contains("unsupported schema version"))
     }
@@ -106,7 +111,7 @@ class BackupTest {
     fun `a version 1 backup without repeat fields still decodes`() = runTest {
         val store = newStore()
         val encoded = LocalBackupCodec.encode(store.seed())
-            .replace("\"schemaVersion\": 2", "\"schemaVersion\": 1")
+            .replace("\"schemaVersion\": 3", "\"schemaVersion\": 1")
 
         val decoded = LocalBackupCodec.decode(encoded)
 
@@ -114,6 +119,18 @@ class BackupTest {
         assertEquals(1, decoded.reminders.size)
         assertNull(decoded.reminders.single().repeatEveryKm)
         assertNull(decoded.reminders.single().repeatEveryDays)
+    }
+
+    @Test
+    fun `a version 2 backup without an odometer reading still decodes`() = runTest {
+        val store = newStore()
+        val encoded = LocalBackupCodec.encode(store.seed().copy(odometer = null))
+            .replace("\"schemaVersion\": 3", "\"schemaVersion\": 2")
+
+        val decoded = LocalBackupCodec.decode(encoded)
+
+        assertEquals(2, decoded.schemaVersion)
+        assertNull(decoded.odometer)
     }
 
     @Test
@@ -133,6 +150,20 @@ class BackupTest {
         assertEquals(restoredTrip.id, target.trips.getTelemetry(restoredTrip.id!!).single().tripId)
         assertEquals(backup.reminders.single(), target.reminders.getReminders(vin).single())
         assertEquals(backup.reminders.single().id, summary.restoredReminderIds.single())
+        assertEquals(backup.odometer, target.odometers.getLatest(vin))
+    }
+
+    @Test
+    fun `restoring a lower manual odometer keeps the higher local reading`() = runTest {
+        val source = newStore()
+        val backup = source.seed()
+        val target = newStore()
+        target.bikes.upsertBike(bike)
+        target.odometers.setReading(vin, 2_000.0, 1)
+
+        target.service.restore(backup, vin, RestoreMode.REPLACE)
+
+        assertEquals(2_000.0, target.odometers.getLatest(vin)!!.odometerKm, 0.0)
     }
 
     @Test

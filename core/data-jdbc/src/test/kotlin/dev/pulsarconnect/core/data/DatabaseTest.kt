@@ -1,6 +1,7 @@
 package dev.pulsarconnect.core.data
 
 import dev.pulsarconnect.core.model.BikeProfile
+import dev.pulsarconnect.core.model.OdometerReading
 import dev.pulsarconnect.core.model.ServiceReminder
 import dev.pulsarconnect.core.model.TelemetryPoint
 import dev.pulsarconnect.core.model.Trip
@@ -307,5 +308,32 @@ class DatabaseTest {
         assertEquals(125.0, db.totalDistanceForVin("VIN"), 0.0)
         assertEquals(2, db.completedTripsBetweenForVin("VIN", base, base + 10_000))
         assertEquals(0, db.completedTripsBetweenForVin("VIN", base + 5_000, base + 10_000))
+    }
+
+    @Test
+    fun `odometer repository is monotonic scoped and usable for reminder due states`() = runTest {
+        db.upsertBike(BikeProfile("VIN", null, null, null, null))
+        db.upsertBike(BikeProfile("OTHER", null, null, null, null))
+        val odometers = SqliteOdometerRepository(db)
+        val trips = SqliteTripRepository(db) { 2_000_000L }
+
+        assertNull(odometers.getLatest("VIN"))
+        assertEquals(OdometerReading("VIN", 1_200.0, 5), odometers.setReading("VIN", 1_200.0, 5))
+        assertEquals(1_200.0, odometers.setReading("VIN", 1_200.0, 6).odometerKm, 0.0)
+        assertEquals(6, odometers.getLatest("VIN")!!.recordedAtMillis)
+        val failure = runCatching { odometers.setReading("VIN", 1_199.9, 7) }.exceptionOrNull()
+        assertTrue(failure is IllegalArgumentException, failure?.message)
+        assertEquals(1_200.0, odometers.getLatest("VIN")!!.odometerKm, 0.0)
+        assertEquals(15.0, odometers.setReading("OTHER", 15.0, 1).odometerKm, 0.0)
+        assertNull(odometers.getLatest("MISSING"))
+
+        assertEquals(1_200.0, latestOdometerKm("VIN", trips, odometers)!!, 0.0)
+        val trip = trips.startTrip("VIN", 1_400.0, null, null)
+        assertEquals(1_400.0, latestOdometerKm("VIN", trips, odometers)!!, 0.0)
+        odometers.setReading("VIN", 1_500.0, 8)
+        assertEquals(1_500.0, latestOdometerKm("VIN", trips, odometers)!!, 0.0)
+        assertEquals(15.0, latestOdometerKm("OTHER", trips, odometers)!!, 0.0)
+        trips.endTrip(trip, 1_600.0, null, null)
+        assertEquals(1_600.0, latestOdometerKm("VIN", trips, odometers)!!, 0.0)
     }
 }

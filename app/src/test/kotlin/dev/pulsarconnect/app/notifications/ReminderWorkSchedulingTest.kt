@@ -18,6 +18,7 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
 import dev.pulsarconnect.core.data.InMemoryReminderRepository
 import dev.pulsarconnect.core.data.InMemoryTripRepository
+import dev.pulsarconnect.core.data.InMemoryOdometerRepository
 import dev.pulsarconnect.core.model.Credentials
 import dev.pulsarconnect.core.model.ServiceReminder
 import dev.pulsarconnect.core.model.Session
@@ -65,7 +66,9 @@ class ReminderWorkSchedulingTest {
             override fun delete(key: String) { value = null }
         })
         sessions.save(StoredSession(Credentials(Vin.of(vin), "test-code"), Session("test-token", null, Instant.EPOCH)))
-        manager = ReminderNotificationManager(context, sessions, InMemoryTripRepository(), reminders)
+        manager = ReminderNotificationManager(
+            context, sessions, InMemoryTripRepository(), reminders, InMemoryOdometerRepository(),
+        )
         WorkManagerTestInitHelper.initializeTestWorkManager(context, Configuration.Builder()
             .setExecutor(executor)
             .setTaskExecutor(executor)

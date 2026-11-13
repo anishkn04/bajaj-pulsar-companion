@@ -363,8 +363,30 @@ class AndroidDatabaseTest {
         val recurring = db.reminders.addReminder(reminder(odometer = 200.0).copy(repeatEveryDays = 30))
         val stored = db.reminders.getReminders(bike.vin).single { it.id == recurring.id }
         assertEquals(30L, stored.repeatEveryDays)
+        // The same upgrade adds the hand-entered odometer table.
+        assertEquals(1_100.0, db.odometers.setReading(bike.vin, 1_100.0, 5).odometerKm, 0.0)
         reopen()
         assertEquals(30L, db.reminders.getReminders(bike.vin).single { it.id == recurring.id }.repeatEveryDays)
+        assertEquals(1_100.0, db.odometers.getLatest(bike.vin)!!.odometerKm, 0.0)
+    }
+
+    @Test fun savedOdometerReadingsAreMonotonicPerBikeAndSurviveReopen() = runBlocking {
+        assertNull(db.odometers.getLatest(bike.vin))
+        val saved = db.odometers.setReading(bike.vin, 1_250.5, 7)
+        assertEquals(saved, db.odometers.getLatest(bike.vin))
+        assertEquals(1_250.5, saved.odometerKm, 0.0)
+        assertEquals(7, saved.recordedAtMillis)
+
+        rejects { db.odometers.setReading(bike.vin, 1_250.4, 8) }
+        assertEquals(1_250.5, db.odometers.getLatest(bike.vin)!!.odometerKm, 0.0)
+        db.odometers.setReading(bike.vin, 1_250.5, 9)
+        assertEquals(9, db.odometers.getLatest(bike.vin)!!.recordedAtMillis)
+        assertEquals(10.0, db.odometers.setReading(other.vin, 10.0, 1).odometerKm, 0.0)
+        rejects { db.odometers.setReading("DEV-MISSING", 1.0, 1) }
+
+        reopen()
+        assertEquals(1_250.5, db.odometers.getLatest(bike.vin)!!.odometerKm, 0.0)
+        assertEquals(10.0, db.odometers.getLatest(other.vin)!!.odometerKm, 0.0)
     }
 
     @Test fun bikeUpsertPreservesChildrenAndNullableProfileFields() = runBlocking {

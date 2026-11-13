@@ -7,11 +7,14 @@ import dev.pulsarconnect.app.AppContainer
 import dev.pulsarconnect.app.notifications.NoOpReminderNotifications
 import dev.pulsarconnect.app.notifications.ReminderNotificationActions
 import dev.pulsarconnect.core.data.BikeRepository
+import dev.pulsarconnect.core.data.InMemoryOdometerRepository
 import dev.pulsarconnect.core.data.LocalBackupCodec
 import dev.pulsarconnect.core.data.LocalBackupService
+import dev.pulsarconnect.core.data.OdometerRepository
 import dev.pulsarconnect.core.data.ReminderRepository
 import dev.pulsarconnect.core.data.RestoreMode
 import dev.pulsarconnect.core.data.TripRepository
+import dev.pulsarconnect.core.data.latestOdometerKm
 import dev.pulsarconnect.core.data.requireValidReminder
 import dev.pulsarconnect.core.data.snoozed
 import dev.pulsarconnect.core.model.BikeProfile
@@ -46,11 +49,12 @@ class AppViewModel(
     private val bikes: BikeRepository,
     private val trips: TripRepository,
     private val reminders: ReminderRepository,
+    private val odometers: OdometerRepository = InMemoryOdometerRepository(),
     private val clock: () -> Long = System::currentTimeMillis,
     private val zone: ZoneId = ZoneId.systemDefault(),
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val notificationActions: ReminderNotificationActions = NoOpReminderNotifications,
-    private val backupService: LocalBackupService = LocalBackupService(trips, reminders, bikes),
+    private val backupService: LocalBackupService = LocalBackupService(trips, reminders, bikes, odometers),
     private val reminderChanges: Flow<Unit> = emptyFlow(),
     private val fetchVehicles: suspend () -> List<Bike> = {
         sessionManager.withSession { stored ->
@@ -164,6 +168,7 @@ class AppViewModel(
         val month = monthRange(clock(), zone)
         val totalDistance = trips.totalDistanceKm(vin)
         val tripsThisMonth = trips.completedTripsBetween(vin, month.first, month.second)
+        val latestOdometer = latestOdometerKm(vin, trips, odometers)
         val visible = page.take(count)
         updateSignedIn(vin, version) {
             it.copy(
@@ -174,7 +179,7 @@ class AppViewModel(
                 localLoading = false,
                 localLoadFailed = false,
                 hasMoreTrips = page.size > count,
-                lastOdometer = active?.startOdometer ?: visible.firstOrNull()?.let { trip -> trip.endOdometer ?: trip.startOdometer },
+                lastOdometer = latestOdometer,
                 totalDistanceKm = totalDistance,
                 tripsThisMonth = tripsThisMonth,
             )
@@ -217,6 +222,17 @@ class AppViewModel(
         val end = parseOdometer(endInput)
         require(end >= start) { "End odometer must not be lower than the start odometer." }
         trips.updateTripOdometer(tripId, start, end)
+    }
+
+    /** Saves a hand-entered reading for reminder due states without starting a trip. */
+    fun updateOdometer(odometerInput: String) = localAction { current ->
+        val odometer = parseOdometer(odometerInput)
+        val previous = current.lastOdometer
+        require(previous == null || odometer >= previous) {
+            "New odometer must not be lower than the last recorded reading."
+        }
+        ensureBike(current.vin)
+        odometers.setReading(current.vin, odometer, clock())
     }
 
     fun deleteTrip(tripId: Long) = localAction { current ->
@@ -567,6 +583,7 @@ class AppViewModel(
             override fun <T : ViewModel> create(modelClass: Class<T>): T = AppViewModel(
                 container.sessionManager, container.api,
                 container.database.bikes, container.database.trips, container.database.reminders,
+                container.database.odometers,
                 notificationActions = container.reminderNotifications,
                 reminderChanges = container.reminderActions.changes,
                 onSignedOut = container.bikeConnection::stop,

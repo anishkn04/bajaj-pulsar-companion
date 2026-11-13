@@ -1,6 +1,7 @@
 package dev.pulsarconnect.core.data
 
 import dev.pulsarconnect.core.model.BikeProfile
+import dev.pulsarconnect.core.model.OdometerReading
 import dev.pulsarconnect.core.model.ServiceReminder
 import dev.pulsarconnect.core.model.TelemetryPoint
 import dev.pulsarconnect.core.model.Trip
@@ -12,7 +13,7 @@ import kotlinx.serialization.json.Json
 /** Placeholder written instead of a VIN when the rider redacts identifying data. */
 const val REDACTED_VIN = "REDACTED-VIN"
 
-const val BACKUP_SCHEMA_VERSION = 2
+const val BACKUP_SCHEMA_VERSION = 3
 
 /** Oldest backup this app can still import. v1 predates recurring reminder fields. */
 const val MIN_BACKUP_SCHEMA_VERSION = 1
@@ -32,6 +33,8 @@ data class LocalBackup(
     val trips: List<Trip>,
     val telemetry: List<TelemetryPoint>,
     val reminders: List<ServiceReminder>,
+    /** Hand-entered odometer reading; absent from schema 1 and 2 backups. */
+    val odometer: OdometerReading? = null,
 )
 
 data class RestoreSummary(
@@ -88,6 +91,7 @@ class LocalBackupService(
     private val trips: TripRepository,
     private val reminders: ReminderRepository,
     private val bikes: BikeRepository,
+    private val odometers: OdometerRepository,
 ) {
     suspend fun export(vin: String, redactVin: Boolean, exportedAtMillis: Long): LocalBackup {
         val bike = bikes.getBike(vin) ?: BikeProfile(vin, null, null, null, null)
@@ -96,6 +100,7 @@ class LocalBackupService(
             trip.id?.let { trips.getTelemetry(it) }.orEmpty()
         }
         val savedReminders = reminders.getReminders(vin)
+        val savedOdometer = odometers.getLatest(vin)
         fun <T> List<T>.redact(transform: (T) -> T): List<T> =
             if (redactVin) map(transform) else this
         return LocalBackup(
@@ -105,6 +110,9 @@ class LocalBackupService(
             trips = savedTrips.redact { it.copy(vin = REDACTED_VIN) },
             telemetry = savedTelemetry,
             reminders = savedReminders.redact { it.copy(vin = REDACTED_VIN) },
+            odometer = savedOdometer?.let {
+                if (redactVin) it.copy(vin = REDACTED_VIN) else it
+            },
         )
     }
 
@@ -153,6 +161,14 @@ class LocalBackupService(
             reminders.restoreReminder(reminder)
             restoredReminderIds.add(reminderId)
         }
+        // Restoring a lower reading would make reminders look overdue again, so keep the
+        // higher local value when the phone already has one.
+        rebound.odometer?.let { reading ->
+            val existing = odometers.getLatest(vin)
+            if (existing == null || reading.odometerKm >= existing.odometerKm) {
+                odometers.setReading(vin, reading.odometerKm, reading.recordedAtMillis)
+            }
+        }
         return RestoreSummary(
             trips = importedTrips,
             telemetryPoints = importedTelemetry,
@@ -173,10 +189,14 @@ class LocalBackupService(
         require(backup.reminders.all { it.vin in allowed }) {
             "This backup contains reminders for a different bike."
         }
+        require(backup.odometer == null || backup.odometer.vin in allowed) {
+            "This backup contains an odometer reading for a different bike."
+        }
         return backup.copy(
             bike = backup.bike.copy(vin = vin),
             trips = backup.trips.map { it.copy(vin = vin) },
             reminders = backup.reminders.map { it.copy(vin = vin) },
+            odometer = backup.odometer?.copy(vin = vin),
         )
     }
 

@@ -1,6 +1,7 @@
 package dev.pulsarconnect.core.data
 
 import dev.pulsarconnect.core.model.BikeProfile
+import dev.pulsarconnect.core.model.OdometerReading
 import dev.pulsarconnect.core.model.ServiceReminder
 import dev.pulsarconnect.core.model.TelemetryPoint
 import dev.pulsarconnect.core.model.Trip
@@ -162,5 +163,23 @@ class SqliteBikeRepository(private val db: Database) : BikeRepository {
             stmt.executeUpdate()
             conn.commit()
         }
+    }
+}
+
+class SqliteOdometerRepository(private val db: Database) : OdometerRepository {
+    override suspend fun getLatest(vin: String): OdometerReading? = db.getOdometerReading(vin)
+
+    override suspend fun setReading(
+        vin: String,
+        odometerKm: Double,
+        recordedAtMillis: Long,
+    ): OdometerReading {
+        requireValidOdometer(odometerKm)
+        requireNotNull(db.getBike(vin)) { "Bike must exist before saving an odometer reading" }
+        val reading = OdometerReading(vin, odometerKm, recordedAtMillis)
+        require(db.upsertOdometerReading(reading) > 0) {
+            "New odometer reading must not be lower than the last recorded reading."
+        }
+        return reading
     }
 }

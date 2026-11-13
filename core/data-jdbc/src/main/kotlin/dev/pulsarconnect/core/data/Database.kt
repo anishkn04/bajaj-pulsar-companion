@@ -1,6 +1,7 @@
 package dev.pulsarconnect.core.data
 
 import dev.pulsarconnect.core.model.BikeProfile
+import dev.pulsarconnect.core.model.OdometerReading
 import dev.pulsarconnect.core.model.ServiceReminder
 import dev.pulsarconnect.core.model.TelemetryPoint
 import dev.pulsarconnect.core.model.Trip
@@ -124,6 +125,14 @@ class Database private constructor(
             ensureColumn(conn, "service_reminder", "repeat_every_days", "INTEGER")
             conn.createStatement().executeUpdate("""
                 CREATE INDEX IF NOT EXISTS idx_reminder_vin_due ON service_reminder(vin, due_odometer_km, due_date_millis)
+            """.trimIndent())
+            conn.createStatement().executeUpdate("""
+                CREATE TABLE IF NOT EXISTS odometer_reading (
+                    vin TEXT PRIMARY KEY,
+                    odometer_km REAL NOT NULL,
+                    recorded_at_millis INTEGER NOT NULL,
+                    FOREIGN KEY (vin) REFERENCES bike_profile(vin)
+                )
             """.trimIndent())
             conn.commit()
         }
@@ -345,6 +354,40 @@ class Database private constructor(
                 stmt.setLong(2, fromMillis)
                 stmt.setLong(3, toMillis)
                 stmt.executeQuery().use { rs -> if (rs.next()) rs.getInt("total") else 0 }
+            }
+        }
+    }
+
+    suspend fun getOdometerReading(vin: String): OdometerReading? = withContext(Dispatchers.IO) {
+        dataSource.connection.use { conn ->
+            conn.prepareStatement("SELECT * FROM odometer_reading WHERE vin = ?").use { stmt ->
+                stmt.setString(1, vin)
+                stmt.executeQuery().use { rs ->
+                    if (rs.next()) {
+                        OdometerReading(
+                            vin = rs.getString("vin"),
+                            odometerKm = rs.getDouble("odometer_km"),
+                            recordedAtMillis = rs.getLong("recorded_at_millis"),
+                        )
+                    } else null
+                }
+            }
+        }
+    }
+
+    /** Returns the number of changed rows; 0 means the new reading was lower than the stored one. */
+    suspend fun upsertOdometerReading(reading: OdometerReading): Int = withContext(Dispatchers.IO) {
+        dataSource.connection.use { conn ->
+            conn.prepareStatement(
+                "INSERT INTO odometer_reading (vin, odometer_km, recorded_at_millis) VALUES (?, ?, ?) " +
+                    "ON CONFLICT(vin) DO UPDATE SET odometer_km = excluded.odometer_km, " +
+                    "recorded_at_millis = excluded.recorded_at_millis " +
+                    "WHERE excluded.odometer_km >= odometer_reading.odometer_km",
+            ).use { stmt ->
+                stmt.setString(1, reading.vin)
+                stmt.setDouble(2, reading.odometerKm)
+                stmt.setLong(3, reading.recordedAtMillis)
+                stmt.executeUpdate()
             }
         }
     }

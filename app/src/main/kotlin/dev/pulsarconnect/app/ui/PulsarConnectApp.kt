@@ -252,6 +252,7 @@ private fun SignedInScreen(
                     onSettings = { navDestination = NavDestination.SETTINGS },
                     onClearError = viewModel::clearError,
                     onRetry = viewModel::retryLocalRecords,
+                    onUpdateOdometer = viewModel::updateOdometer,
                 )
             }
         }

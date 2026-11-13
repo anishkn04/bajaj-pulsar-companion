@@ -19,8 +19,10 @@ import androidx.work.testing.TestListenableWorkerBuilder
 import androidx.work.testing.WorkManagerTestInitHelper
 import dev.pulsarconnect.app.MainActivity
 import dev.pulsarconnect.app.PulsarConnectApplication
+import dev.pulsarconnect.core.data.InMemoryOdometerRepository
 import dev.pulsarconnect.core.data.InMemoryReminderRepository
 import dev.pulsarconnect.core.data.InMemoryTripRepository
+import dev.pulsarconnect.core.data.OdometerRepository
 import dev.pulsarconnect.core.data.ReminderRepository
 import dev.pulsarconnect.core.data.TripRepository
 import dev.pulsarconnect.core.model.Credentials
@@ -60,6 +62,7 @@ class ReminderNotificationTest {
     private val otherVin = "MD2ABCDEFGH654321"
     private val trips = InMemoryTripRepository()
     private val reminders = InMemoryReminderRepository()
+    private val odometers = InMemoryOdometerRepository()
     private var sessionReads = 0
     private var storageFailure = false
     private val secrets = object : SecretStore {
@@ -93,8 +96,11 @@ class ReminderNotificationTest {
         manager.ensureChannel()
     }
 
-    private fun controller(tripRepo: TripRepository = trips, reminderRepo: ReminderRepository = reminders) =
-        ReminderNotificationManager(context, sessions, tripRepo, reminderRepo)
+    private fun controller(
+        tripRepo: TripRepository = trips,
+        reminderRepo: ReminderRepository = reminders,
+        odometerRepo: OdometerRepository = odometers,
+    ) = ReminderNotificationManager(context, sessions, tripRepo, reminderRepo, odometerRepo)
 
     private fun grantPermission() {
         if (Build.VERSION.SDK_INT >= 33) shadowOf(context as Application).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
@@ -614,5 +620,19 @@ class ReminderNotificationTest {
         )
         // Locked phones must not offer reminder actions.
         assertTrue(n.publicVersion.actions.isNullOrEmpty())
+    }
+
+    @Test fun `a hand entered odometer makes reminders due without a trip`() = runBlocking {
+        due(odometer = 1_500.0, date = null)
+        manager.setEnabled(true)
+        assertEquals(ListenableWorker.Result.success(), worker().doWork())
+        assertTrue(notifications.activeNotifications.isEmpty())
+
+        odometers.setReading(vin, 1_500.0, 1)
+        manager.refresh()
+        assertEquals(ListenableWorker.Result.success(), worker().doWork())
+
+        assertEquals(1, notifications.activeNotifications.size)
+        assertFalse(notifications.activeNotifications.single().notification.flags and Notification.FLAG_ONGOING_EVENT != 0)
     }
 }

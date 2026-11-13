@@ -24,6 +24,17 @@ data class Trip(
         get() = endTime?.let { ((it - startTime) / 1_000).coerceAtLeast(0) } ?: 0
 }
 
+/**
+ * An odometer value the rider recorded by hand without starting a trip. Kept separate from
+ * trips so a quick update never rewrites recorded ride history.
+ */
+@Serializable
+data class OdometerReading(
+    val vin: String,
+    val odometerKm: Double,
+    val recordedAtMillis: Long,
+)
+
 @Serializable
 data class TelemetryPoint(
     val id: Long? = null,

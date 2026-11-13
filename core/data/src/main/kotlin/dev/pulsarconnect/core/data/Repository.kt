@@ -1,6 +1,7 @@
 package dev.pulsarconnect.core.data
 
 import dev.pulsarconnect.core.model.BikeProfile
+import dev.pulsarconnect.core.model.OdometerReading
 import dev.pulsarconnect.core.model.ServiceReminder
 import dev.pulsarconnect.core.model.TelemetryPoint
 import dev.pulsarconnect.core.model.Trip
@@ -75,6 +76,32 @@ interface BikeRepository {
     suspend fun upsertBike(profile: BikeProfile): BikeProfile
     suspend fun getBike(vin: String): BikeProfile?
     suspend fun updateLastSynced(vin: String, atMillis: Long)
+}
+
+interface OdometerRepository {
+    suspend fun getLatest(vin: String): OdometerReading?
+
+    /**
+     * Stores a hand-entered reading for this bike. Rejects values below the already-stored
+     * reading so a mistyped update cannot make due reminders look overdue again.
+     */
+    suspend fun setReading(vin: String, odometerKm: Double, recordedAtMillis: Long): OdometerReading
+}
+
+/**
+ * The odometer used for reminder due states: the active trip's start, otherwise the latest
+ * completed trip's end, and a hand-entered reading when that is higher.
+ */
+suspend fun latestOdometerKm(
+    vin: String,
+    trips: TripRepository,
+    odometers: OdometerRepository,
+): Double? {
+    val active = trips.getActiveTrip(vin)
+    val fromTrips = active?.startOdometer
+        ?: trips.getTrips(vin, 1, 0).firstOrNull()?.let { it.endOdometer ?: it.startOdometer }
+    val manual = odometers.getLatest(vin)?.odometerKm
+    return listOfNotNull(fromTrips, manual).maxOrNull()
 }
 
 // --- In-memory implementations for tests ---
@@ -269,5 +296,25 @@ class InMemoryBikeRepository : BikeRepository {
 
     override suspend fun updateLastSynced(vin: String, atMillis: Long): Unit = mutex.withLock {
         bikes[vin]?.let { bikes[vin] = it.copy(lastSyncedAtMillis = atMillis) }
+    }
+}
+
+class InMemoryOdometerRepository : OdometerRepository {
+    private val readings = mutableMapOf<String, OdometerReading>()
+    private val mutex = Mutex()
+
+    override suspend fun getLatest(vin: String): OdometerReading? = mutex.withLock { readings[vin] }
+
+    override suspend fun setReading(
+        vin: String,
+        odometerKm: Double,
+        recordedAtMillis: Long,
+    ): OdometerReading = mutex.withLock {
+        requireValidOdometer(odometerKm)
+        val existing = readings[vin]
+        require(existing == null || odometerKm >= existing.odometerKm) {
+            "New odometer reading must not be lower than the last recorded reading."
+        }
+        OdometerReading(vin, odometerKm, recordedAtMillis).also { readings[vin] = it }
     }
 }
