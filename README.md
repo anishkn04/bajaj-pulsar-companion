@@ -109,8 +109,8 @@ CI/CD runs on GitHub Actions:
 To cut a release:
 
 ```sh
-git tag -a v0.1.1 -m "v0.1.1"
-git push origin v0.1.1
+git tag -a v0.2.0 -m "v0.2.0"
+git push origin v0.2.0
 ```
 
 Release signing uses a keystore provided only through GitHub Actions secrets (`RELEASE_KEYSTORE_B64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`). Keystores and `keystore.properties` are never committed. Never include real VINs, access codes, tokens, or captures in releases.
