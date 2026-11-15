@@ -91,7 +91,7 @@ fun PulsarConnectApp(
     }
 }
 
-private enum class NavDestination { HOME, BIKE, TRIPS, REMINDERS, SETTINGS }
+private enum class NavDestination { HOME, BIKE, TRIPS, FUEL, REMINDERS, SETTINGS }
 
 private data class NavItem(
     val destination: NavDestination,
@@ -200,7 +200,8 @@ private fun SignedInScreen(
             snackbarHost = { SnackbarHost(snackbarHostState) },
             bottomBar = {
                 PulsarNavigationBar(
-                    selected = navDestination,
+                    // Fuel is a Home sub-screen, so keep the Home tab highlighted there.
+                    selected = if (navDestination == NavDestination.FUEL) NavDestination.HOME else navDestination,
                     onSelected = { navDestination = it },
                 )
             },
@@ -223,6 +224,14 @@ private fun SignedInScreen(
                         onClearFilter = viewModel::clearTripFilter,
                         onClearError = viewModel::clearError,
                         onRetry = viewModel::retryLocalRecords,
+                    )
+                    NavDestination.FUEL -> FuelScreen(
+                        state = state,
+                        onAddFillUp = viewModel::addFillUp,
+                        onDeleteFillUp = viewModel::deleteFillUp,
+                        onClearError = viewModel::clearError,
+                        onRetry = viewModel::retryLocalRecords,
+                        onBack = { navDestination = NavDestination.HOME },
                     )
                     NavDestination.REMINDERS -> RemindersScreen(
                         state = state,
@@ -279,6 +288,7 @@ private fun SignedInScreen(
                         bleState = bleState,
                         onSignOut = viewModel::signOut,
                         onTrips = { navDestination = NavDestination.TRIPS },
+                        onFuel = { navDestination = NavDestination.FUEL },
                         onReminders = { navDestination = NavDestination.REMINDERS },
                         onBike = { navDestination = NavDestination.BIKE },
                         onSettings = { navDestination = NavDestination.SETTINGS },

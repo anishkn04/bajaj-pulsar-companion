@@ -7,6 +7,8 @@ import dev.pulsarconnect.app.AppContainer
 import dev.pulsarconnect.app.notifications.NoOpReminderNotifications
 import dev.pulsarconnect.app.notifications.ReminderNotificationActions
 import dev.pulsarconnect.core.data.BikeRepository
+import dev.pulsarconnect.core.data.FuelRepository
+import dev.pulsarconnect.core.data.InMemoryFuelRepository
 import dev.pulsarconnect.core.data.InMemoryOdometerRepository
 import dev.pulsarconnect.core.data.LocalBackupCodec
 import dev.pulsarconnect.core.data.LocalBackupService
@@ -19,6 +21,7 @@ import dev.pulsarconnect.core.data.requireValidReminder
 import dev.pulsarconnect.core.data.snoozed
 import dev.pulsarconnect.core.model.BikeProfile
 import dev.pulsarconnect.core.model.Credentials
+import dev.pulsarconnect.core.model.FuelFillUp
 import dev.pulsarconnect.core.model.ServiceReminder
 import dev.pulsarconnect.core.model.Trip
 import dev.pulsarconnect.core.model.Vin
@@ -50,11 +53,12 @@ class AppViewModel(
     private val trips: TripRepository,
     private val reminders: ReminderRepository,
     private val odometers: OdometerRepository = InMemoryOdometerRepository(),
+    private val fuels: FuelRepository = InMemoryFuelRepository(),
     private val clock: () -> Long = System::currentTimeMillis,
     private val zone: ZoneId = ZoneId.systemDefault(),
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val notificationActions: ReminderNotificationActions = NoOpReminderNotifications,
-    private val backupService: LocalBackupService = LocalBackupService(trips, reminders, bikes, odometers),
+    private val backupService: LocalBackupService = LocalBackupService(trips, reminders, bikes, odometers, fuels),
     private val reminderChanges: Flow<Unit> = emptyFlow(),
     private val fetchVehicles: suspend () -> List<Bike> = {
         sessionManager.withSession { stored ->
@@ -169,6 +173,7 @@ class AppViewModel(
             vin, filter?.tripFilterFrom, filter?.tripFilterTo, count + 1, 0,
         )
         val savedReminders = reminders.getReminders(vin)
+        val savedFillUps = fuels.getFillUps(vin)
         val month = monthRange(clock(), zone)
         val totalDistance = trips.totalDistanceKm(vin)
         val tripsThisMonth = trips.completedTripsBetween(vin, month.first, month.second)
@@ -180,6 +185,7 @@ class AppViewModel(
                 trips = visible,
                 activeTrip = active,
                 reminders = savedReminders,
+                fillUps = savedFillUps,
                 localLoading = false,
                 localLoadFailed = false,
                 hasMoreTrips = page.size > count,
@@ -237,6 +243,34 @@ class AppViewModel(
         }
         ensureBike(current.vin)
         odometers.setReading(current.vin, odometer, clock())
+    }
+
+    /**
+     * Records a manual fill-up. A fill-up is also a real odometer reading, so the latest
+     * hand-entered value is raised when needed and reminder due states refresh afterwards.
+     */
+    fun addFillUp(odometerInput: String, litersInput: String, fullTank: Boolean) = localAction { current ->
+        val odometer = parseOdometer(odometerInput)
+        val liters = parseLiters(litersInput)
+        ensureBike(current.vin)
+        fuels.addFillUp(
+            FuelFillUp(
+                vin = current.vin,
+                filledAtMillis = clock(),
+                odometerKm = odometer,
+                liters = liters,
+                fullTank = fullTank,
+            ),
+        )
+        val latest = odometers.getLatest(current.vin)
+        if (latest == null || odometer > latest.odometerKm) {
+            odometers.setReading(current.vin, odometer, clock())
+        }
+    }
+
+    fun deleteFillUp(id: Long) = localAction { current ->
+        require(current.fillUps.any { it.id == id }) { "That fill-up is no longer available." }
+        fuels.deleteFillUp(id)
     }
 
     fun deleteTrip(tripId: Long) = localAction { current ->
@@ -365,7 +399,7 @@ class AppViewModel(
             )
         }
         val message = "Exported ${backup.trips.size} trips, ${backup.telemetry.size} ride samples, " +
-            "and ${backup.reminders.size} reminders" +
+            "${backup.reminders.size} reminders, and ${backup.fillUps.size} fill-ups" +
             if (redactVin) " with the VIN redacted." else "."
         updateSignedIn(current.vin, generation) { it.copy(notice = message) }
     }
@@ -380,11 +414,11 @@ class AppViewModel(
             }
         }
         val prefix = if (mode == RestoreMode.REPLACE) "Replaced local records with" else "Merged"
-        val message = if (summary.trips + summary.telemetryPoints + summary.reminders == 0) {
+        val message = if (summary.trips + summary.telemetryPoints + summary.reminders + summary.fillUps == 0) {
             "No new records restored. Existing records were kept."
         } else {
             "$prefix ${summary.trips} trips, ${summary.telemetryPoints} ride samples, " +
-                "and ${summary.reminders} reminders."
+                "${summary.reminders} reminders, and ${summary.fillUps} fill-ups."
         }
         updateSignedIn(current.vin, generation) { it.copy(notice = message) }
     }
@@ -604,6 +638,14 @@ class AppViewModel(
         return value
     }
 
+    private fun parseLiters(input: String): Double {
+        val value = input.trim().toDoubleOrNull()
+        require(value != null && value.isFinite() && value > 0) {
+            "Enter litres greater than 0."
+        }
+        return value
+    }
+
     private fun parseReminderTitle(input: String): String =
         input.trim().also { require(it.isNotEmpty()) { "Enter a reminder title." } }
 
@@ -661,7 +703,7 @@ class AppViewModel(
             override fun <T : ViewModel> create(modelClass: Class<T>): T = AppViewModel(
                 container.sessionManager, container.api,
                 container.database.bikes, container.database.trips, container.database.reminders,
-                container.database.odometers,
+                container.database.odometers, container.database.fuels,
                 notificationActions = container.reminderNotifications,
                 reminderChanges = container.reminderActions.changes,
                 onSignedOut = container.bikeConnection::stop,
@@ -679,6 +721,8 @@ sealed interface UiState {
         val trips: List<Trip> = emptyList(),
         val activeTrip: Trip? = null,
         val reminders: List<ServiceReminder> = emptyList(),
+        /** Manual fill-ups, newest odometer first. */
+        val fillUps: List<FuelFillUp> = emptyList(),
         val reminderNotificationsEnabled: Boolean = false,
         val localLoading: Boolean = true,
         val localLoadFailed: Boolean = false,

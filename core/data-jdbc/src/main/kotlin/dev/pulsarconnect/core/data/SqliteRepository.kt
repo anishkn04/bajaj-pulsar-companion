@@ -1,6 +1,7 @@
 package dev.pulsarconnect.core.data
 
 import dev.pulsarconnect.core.model.BikeProfile
+import dev.pulsarconnect.core.model.FuelFillUp
 import dev.pulsarconnect.core.model.OdometerReading
 import dev.pulsarconnect.core.model.ServiceReminder
 import dev.pulsarconnect.core.model.TelemetryPoint
@@ -171,6 +172,35 @@ class SqliteBikeRepository(private val db: Database) : BikeRepository {
             stmt.executeUpdate()
             conn.commit()
         }
+    }
+}
+
+class SqliteFuelRepository(private val db: Database) : FuelRepository {
+    override suspend fun addFillUp(fillUp: FuelFillUp): FuelFillUp {
+        requireValidFillUp(fillUp)
+        requireNotNull(db.getBike(fillUp.vin)) { "Bike must exist before saving a fill-up" }
+        val latest = db.latestFillUpOdometer(fillUp.vin)
+        require(latest == null || fillUp.odometerKm > latest) {
+            "Fill-up odometer must be higher than the previous fill-up."
+        }
+        return fillUp.copy(id = db.insertFillUp(fillUp))
+    }
+
+    override suspend fun getFillUps(vin: String): List<FuelFillUp> = db.getFillUpsForVin(vin)
+
+    override suspend fun getFillUp(id: Long): FuelFillUp? = db.getFillUp(id)
+
+    override suspend fun deleteFillUp(id: Long) {
+        requireNotNull(db.getFillUp(id)) { "Fill-up must exist before it can be deleted" }
+        db.deleteFillUp(id)
+    }
+
+    override suspend fun restoreFillUp(fillUp: FuelFillUp): FuelFillUp {
+        requireValidFillUp(fillUp)
+        val id = requireNotNull(fillUp.id) { "Fill-up must have an ID" }
+        require(db.getFillUp(id) == null) { "Fill-up ID is already in use" }
+        requireNotNull(db.getBike(fillUp.vin)) { "Bike must exist before a fill-up can be restored" }
+        return db.insertFillUpWithId(fillUp)
     }
 }
 

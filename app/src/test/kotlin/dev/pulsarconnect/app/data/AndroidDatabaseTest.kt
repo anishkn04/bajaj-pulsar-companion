@@ -5,6 +5,7 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.os.Looper
 import dev.pulsarconnect.core.model.BikeProfile
+import dev.pulsarconnect.core.model.FuelFillUp
 import dev.pulsarconnect.core.model.ServiceReminder
 import dev.pulsarconnect.core.model.TelemetryPoint
 import kotlinx.coroutines.async
@@ -404,6 +405,85 @@ class AndroidDatabaseTest {
         reopen()
         assertEquals(30L, db.reminders.getReminders(bike.vin).single { it.id == recurring.id }.repeatEveryDays)
         assertEquals(1_100.0, db.odometers.getLatest(bike.vin)!!.odometerKm, 0.0)
+    }
+
+    @Test fun schemaThreeUpgradeAddsFuelTableWithoutLosingRecords() = runBlocking {
+        db.close()
+        context.deleteDatabase(name)
+        val legacy = object : android.database.sqlite.SQLiteOpenHelper(context, name, null, 3) {
+            init {
+                setWriteAheadLoggingEnabled(true)
+            }
+
+            override fun onCreate(legacyDb: SQLiteDatabase) {
+                legacyDb.execSQL(
+                    "CREATE TABLE bike_profile (vin TEXT PRIMARY KEY NOT NULL, model TEXT, " +
+                        "model_image_url TEXT, nickname TEXT, purchase_date_millis INTEGER, last_synced_at_millis INTEGER)",
+                )
+                legacyDb.execSQL(
+                    "CREATE TABLE service_reminder (id INTEGER PRIMARY KEY AUTOINCREMENT, " +
+                        "vin TEXT NOT NULL REFERENCES bike_profile(vin), title TEXT NOT NULL, description TEXT, " +
+                        "due_odometer_km REAL, due_date_millis INTEGER, repeat_every_km REAL, repeat_every_days INTEGER, " +
+                        "completed INTEGER NOT NULL DEFAULT 0, completed_at_millis INTEGER, created_at_millis INTEGER NOT NULL)",
+                )
+                legacyDb.execSQL(
+                    "CREATE TABLE odometer_reading (vin TEXT PRIMARY KEY NOT NULL REFERENCES bike_profile(vin), " +
+                        "odometer_km REAL NOT NULL, recorded_at_millis INTEGER NOT NULL)",
+                )
+                legacyDb.execSQL("INSERT INTO bike_profile (vin) VALUES (?)", arrayOf(bike.vin))
+                legacyDb.execSQL(
+                    "INSERT INTO service_reminder (vin, title, due_odometer_km, created_at_millis, repeat_every_days) " +
+                        "VALUES (?, ?, ?, ?, ?)",
+                    arrayOf(bike.vin, "Legacy service", 100.0, 0, 30L),
+                )
+                legacyDb.execSQL(
+                    "INSERT INTO odometer_reading (vin, odometer_km, recorded_at_millis) VALUES (?, ?, ?)",
+                    arrayOf(bike.vin, 4_321.0, 5L),
+                )
+            }
+
+            override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) =
+                error("Test helper only creates schema 3")
+        }
+        legacy.writableDatabase
+        legacy.close()
+
+        db = AndroidDatabase(context, name) { now }
+        db.bikes.getBike("DEV-MISSING")
+        context.openOrCreateDatabase(name, Context.MODE_PRIVATE, null).close()
+
+        assertEquals(30L, db.reminders.getReminders(bike.vin).single().repeatEveryDays)
+        assertEquals(4_321.0, db.odometers.getLatest(bike.vin)!!.odometerKm, 0.0)
+
+        val saved = db.fuels.addFillUp(
+            FuelFillUp(vin = bike.vin, filledAtMillis = now, odometerKm = 4_400.0, liters = 9.5, fullTank = true),
+        )
+        assertEquals(saved, db.fuels.getFillUp(saved.id!!))
+        reopen()
+        assertEquals(listOf(saved), db.fuels.getFillUps(bike.vin))
+    }
+
+    @Test fun fillUpsAreScopedOrderedMonotonicAndSurviveReopen() = runBlocking {
+        fun fillUp(odometer: Double, vin: String = bike.vin) = FuelFillUp(
+            vin = vin, filledAtMillis = now, odometerKm = odometer, liters = 8.0, fullTank = true,
+        )
+
+        val first = db.fuels.addFillUp(fillUp(1_000.0))
+        val second = db.fuels.addFillUp(fillUp(1_200.0))
+        assertEquals(listOf(second.id, first.id), db.fuels.getFillUps(bike.vin).map { it.id })
+        assertEquals(first, db.fuels.getFillUp(first.id!!))
+
+        rejects { db.fuels.addFillUp(fillUp(1_200.0)) }
+        rejects { db.fuels.addFillUp(fillUp(900.0)) }
+        assertEquals(10.0, db.fuels.addFillUp(fillUp(10.0, other.vin)).odometerKm, 0.0)
+        rejects { db.fuels.addFillUp(fillUp(20.0, "DEV-MISSING")) }
+
+        reopen()
+        assertEquals(2, db.fuels.getFillUps(bike.vin).size)
+
+        db.fuels.deleteFillUp(first.id!!)
+        assertNull(db.fuels.getFillUp(first.id!!))
+        rejects { db.fuels.deleteFillUp(first.id!!) }
     }
 
     @Test fun savedOdometerReadingsAreMonotonicPerBikeAndSurviveReopen() = runBlocking {

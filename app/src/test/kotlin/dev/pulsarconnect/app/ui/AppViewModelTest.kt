@@ -2,6 +2,7 @@ package dev.pulsarconnect.app.ui
 
 import dev.pulsarconnect.app.notifications.ReminderNotificationActions
 import dev.pulsarconnect.core.data.InMemoryBikeRepository
+import dev.pulsarconnect.core.data.InMemoryFuelRepository
 import dev.pulsarconnect.core.data.InMemoryOdometerRepository
 import dev.pulsarconnect.core.data.InMemoryReminderRepository
 import dev.pulsarconnect.core.data.InMemoryTripRepository
@@ -45,6 +46,7 @@ class AppViewModelTest {
     private val trips = InMemoryTripRepository { now }
     private val reminders = InMemoryReminderRepository()
     private val odometers = InMemoryOdometerRepository()
+    private val fuels = InMemoryFuelRepository()
     private val secrets = object : SecretStore {
         val values = mutableMapOf<String, String>()
         override fun read(key: String) = values[key]
@@ -107,7 +109,7 @@ class AppViewModelTest {
         val api = BajajApi("https://example.invalid")
         return AppViewModel(
             BajajSessionManager(api, sessionRepository), api, bikes, tripRepository, reminders,
-            odometers, clock = { now }, zone = ZoneOffset.UTC, ioDispatcher = dispatcher,
+            odometers, fuels, clock = { now }, zone = ZoneOffset.UTC, ioDispatcher = dispatcher,
                         notificationActions = notifications, fetchVehicles = fetch,
         )
     }
@@ -130,6 +132,57 @@ class AppViewModelTest {
         vm.endTrip("110")
         advanceUntilIdle()
         assertEquals(listOf("refresh"), notifications.events)
+    }
+
+    @Test fun `logging a fill-up raises the odometer and refreshes reminders`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+        notifications.events.clear()
+
+        vm.addFillUp("1200.5", "10.5", fullTank = true)
+        advanceUntilIdle()
+
+        val state = signedIn(vm)
+        assertEquals(1, state.fillUps.size)
+        assertEquals(1_200.5, state.fillUps.single().odometerKm, 0.0)
+        assertEquals(10.5, state.fillUps.single().liters, 0.0)
+        assertEquals(1_200.5, state.lastOdometer!!, 0.0)
+        assertEquals(1_200.5, odometers.getLatest(vin)!!.odometerKm, 0.0)
+        assertEquals(listOf("refresh"), notifications.events)
+        assertFalse(state.busy)
+    }
+
+    @Test fun `a fill-up must increase the odometer and use positive litres`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+
+        vm.addFillUp("1000", "8", fullTank = true)
+        advanceUntilIdle()
+        vm.addFillUp("1000", "8", fullTank = true)
+        advanceUntilIdle()
+        assertTrue(signedIn(vm).error!!.contains("higher"))
+        assertEquals(1, signedIn(vm).fillUps.size)
+
+        vm.clearError()
+        vm.addFillUp("1100", "0", fullTank = true)
+        advanceUntilIdle()
+        assertTrue(signedIn(vm).error!!.contains("litres"))
+        assertEquals(1, signedIn(vm).fillUps.size)
+    }
+
+    @Test fun `deleting a fill-up keeps the odometer high-water mark`() = runTest(dispatcher) {
+        val vm = viewModel()
+        advanceUntilIdle()
+        vm.addFillUp("1500", "9", fullTank = false)
+        advanceUntilIdle()
+        val id = signedIn(vm).fillUps.single().id!!
+
+        vm.deleteFillUp(id)
+        advanceUntilIdle()
+
+        assertTrue(signedIn(vm).fillUps.isEmpty())
+        assertEquals(1_500.0, signedIn(vm).lastOdometer!!, 0.0)
+        assertEquals(1_500.0, odometers.getLatest(vin)!!.odometerKm, 0.0)
     }
 
     @Test fun `opt in preference changes and resume rechecks are wired without modifying records`() = runTest(dispatcher) {

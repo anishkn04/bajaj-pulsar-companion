@@ -1,6 +1,7 @@
 package dev.pulsarconnect.core.data
 
 import dev.pulsarconnect.core.model.BikeProfile
+import dev.pulsarconnect.core.model.FuelFillUp
 import dev.pulsarconnect.core.model.OdometerReading
 import dev.pulsarconnect.core.model.ServiceReminder
 import dev.pulsarconnect.core.model.TelemetryPoint
@@ -133,6 +134,20 @@ class Database private constructor(
                     recorded_at_millis INTEGER NOT NULL,
                     FOREIGN KEY (vin) REFERENCES bike_profile(vin)
                 )
+            """.trimIndent())
+            conn.createStatement().executeUpdate("""
+                CREATE TABLE IF NOT EXISTS fuel_fill_up (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    vin TEXT NOT NULL,
+                    filled_at_millis INTEGER NOT NULL,
+                    odometer_km REAL NOT NULL,
+                    liters REAL NOT NULL,
+                    full_tank INTEGER NOT NULL,
+                    FOREIGN KEY (vin) REFERENCES bike_profile(vin)
+                )
+            """.trimIndent())
+            conn.createStatement().executeUpdate("""
+                CREATE INDEX IF NOT EXISTS idx_fuel_vin_odometer ON fuel_fill_up(vin, odometer_km DESC, id DESC)
             """.trimIndent())
             conn.commit()
         }
@@ -425,6 +440,107 @@ class Database private constructor(
             }
         }
     }
+
+    // --- FuelFillUp ---
+    suspend fun insertFillUp(fillUp: FuelFillUp): Long = withContext(Dispatchers.IO) {
+        dataSource.connection.use { conn ->
+            conn.setAutoCommit(false)
+            val id = insertFillUpRow(conn, fillUp)
+            conn.commit()
+            id
+        }
+    }
+
+    /** Re-inserts a fill-up with its original ID so a backup restore preserves the record. */
+    suspend fun insertFillUpWithId(fillUp: FuelFillUp): FuelFillUp = withContext(Dispatchers.IO) {
+        val id = requireNotNull(fillUp.id) { "Fill-up must have an ID" }
+        dataSource.connection.use { conn ->
+            conn.setAutoCommit(false)
+            insertFillUpRow(conn, fillUp, id)
+            conn.commit()
+            fillUp
+        }
+    }
+
+    private fun insertFillUpRow(
+        conn: java.sql.Connection,
+        fillUp: FuelFillUp,
+        id: Long? = null,
+    ): Long {
+        val columns = if (id == null) {
+            "vin, filled_at_millis, odometer_km, liters, full_tank"
+        } else {
+            "id, vin, filled_at_millis, odometer_km, liters, full_tank"
+        }
+        val placeholders = if (id == null) "?, ?, ?, ?, ?" else "?, ?, ?, ?, ?, ?"
+        val stmt = conn.prepareStatement(
+            "INSERT INTO fuel_fill_up ($columns) VALUES ($placeholders)",
+            java.sql.Statement.RETURN_GENERATED_KEYS,
+        )
+        var index = 1
+        if (id != null) stmt.setLong(index++, id)
+        stmt.setString(index++, fillUp.vin)
+        stmt.setLong(index++, fillUp.filledAtMillis)
+        stmt.setDouble(index++, fillUp.odometerKm)
+        stmt.setDouble(index++, fillUp.liters)
+        stmt.setInt(index, if (fillUp.fullTank) 1 else 0)
+        stmt.executeUpdate()
+        val keys = stmt.generatedKeys
+        return if (keys.next()) keys.getLong(1) else id ?: -1
+    }
+
+    suspend fun getFillUpsForVin(vin: String): List<FuelFillUp> = withContext(Dispatchers.IO) {
+        dataSource.connection.use { conn ->
+            conn.prepareStatement(
+                "SELECT * FROM fuel_fill_up WHERE vin = ? ORDER BY odometer_km DESC, id DESC",
+            ).use { stmt ->
+                stmt.setString(1, vin)
+                stmt.executeQuery().use { rs ->
+                    val list = mutableListOf<FuelFillUp>()
+                    while (rs.next()) list.add(mapFillUp(rs))
+                    list
+                }
+            }
+        }
+    }
+
+    suspend fun getFillUp(id: Long): FuelFillUp? = withContext(Dispatchers.IO) {
+        dataSource.connection.use { conn ->
+            conn.prepareStatement("SELECT * FROM fuel_fill_up WHERE id = ?").use { stmt ->
+                stmt.setLong(1, id)
+                stmt.executeQuery().use { rs -> if (rs.next()) mapFillUp(rs) else null }
+            }
+        }
+    }
+
+    suspend fun latestFillUpOdometer(vin: String): Double? = withContext(Dispatchers.IO) {
+        dataSource.connection.use { conn ->
+            conn.prepareStatement("SELECT MAX(odometer_km) AS latest FROM fuel_fill_up WHERE vin = ?").use { stmt ->
+                stmt.setString(1, vin)
+                stmt.executeQuery().use { rs ->
+                    if (rs.next()) rs.getNullableDouble("latest") else null
+                }
+            }
+        }
+    }
+
+    suspend fun deleteFillUp(id: Long) = withContext(Dispatchers.IO) {
+        dataSource.connection.use { conn ->
+            conn.prepareStatement("DELETE FROM fuel_fill_up WHERE id = ?").use { stmt ->
+                stmt.setLong(1, id)
+                stmt.executeUpdate()
+            }
+        }
+    }
+
+    private fun mapFillUp(rs: java.sql.ResultSet): FuelFillUp = FuelFillUp(
+        id = rs.getLong("id"),
+        vin = rs.getString("vin"),
+        filledAtMillis = rs.getLong("filled_at_millis"),
+        odometerKm = rs.getDouble("odometer_km"),
+        liters = rs.getDouble("liters"),
+        fullTank = rs.getInt("full_tank") == 1,
+    )
 
     private fun mapTrip(rs: java.sql.ResultSet): Trip = Trip(
         id = rs.getLong("id"),

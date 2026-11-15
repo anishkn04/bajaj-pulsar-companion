@@ -43,6 +43,7 @@ internal fun HomeScreen(
     bleState: BleUiState,
     onSignOut: () -> Unit,
     onTrips: () -> Unit,
+    onFuel: () -> Unit,
     onReminders: () -> Unit,
     onBike: () -> Unit,
     onSettings: () -> Unit,
@@ -110,6 +111,13 @@ internal fun HomeScreen(
             },
             actionLabel = "View trips",
             onAction = onTrips,
+        )
+        HomeFeatureCard(
+            title = "Fuel",
+            value = fuelSummaryValue(state.fillUps),
+            detail = fuelSummaryDetail(state.fillUps),
+            actionLabel = "View fuel",
+            onAction = onFuel,
         )
         HomeFeatureCard(
             title = "Reminders",

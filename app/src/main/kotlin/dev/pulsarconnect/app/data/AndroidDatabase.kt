@@ -6,15 +6,18 @@ import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import dev.pulsarconnect.core.data.BikeRepository
+import dev.pulsarconnect.core.data.FuelRepository
 import dev.pulsarconnect.core.data.OdometerRepository
 import dev.pulsarconnect.core.data.ReminderRepository
 import dev.pulsarconnect.core.data.TripRepository
 import dev.pulsarconnect.core.data.correctedOdometer
 import dev.pulsarconnect.core.data.isDue
 import dev.pulsarconnect.core.data.nextOccurrence
+import dev.pulsarconnect.core.data.requireValidFillUp
 import dev.pulsarconnect.core.data.requireValidOdometer
 import dev.pulsarconnect.core.data.requireValidReminder
 import dev.pulsarconnect.core.model.BikeProfile
+import dev.pulsarconnect.core.model.FuelFillUp
 import dev.pulsarconnect.core.model.OdometerReading
 import dev.pulsarconnect.core.model.ServiceReminder
 import dev.pulsarconnect.core.model.TelemetryPoint
@@ -233,6 +236,45 @@ class AndroidDatabase(
         }
     }
 
+    val fuels: FuelRepository = object : FuelRepository {
+        override suspend fun addFillUp(fillUp: FuelFillUp): FuelFillUp = access { db ->
+            requireValidFillUp(fillUp)
+            db.transaction {
+                requireBike(fillUp.vin)
+                val latest = db.findFillUps(fillUp.vin).maxOfOrNull { it.odometerKm }
+                require(latest == null || fillUp.odometerKm > latest) {
+                    "Fill-up odometer must be higher than the previous fill-up."
+                }
+                fillUp.copy(id = insertOrThrow("fuel_fill_up", null, fillUp.values()))
+            }
+        }
+
+        override suspend fun getFillUps(vin: String): List<FuelFillUp> = access { db ->
+            db.findFillUps(vin)
+        }
+
+        override suspend fun getFillUp(id: Long): FuelFillUp? = access { db -> db.findFillUp(id) }
+
+        override suspend fun deleteFillUp(id: Long): Unit = access { db ->
+            db.transaction {
+                requireNotNull(findFillUp(id)) { "Fill-up must exist before it can be deleted" }
+                delete("fuel_fill_up", "id = ?", arrayOf(id.toString()))
+                Unit
+            }
+        }
+
+        override suspend fun restoreFillUp(fillUp: FuelFillUp): FuelFillUp = access { db ->
+            requireValidFillUp(fillUp)
+            db.transaction {
+                val id = requireNotNull(fillUp.id) { "Fill-up must have an ID" }
+                requireBike(fillUp.vin)
+                require(findFillUp(id) == null) { "Fill-up ID is already in use" }
+                insertOrThrow("fuel_fill_up", null, fillUp.values().apply { put("id", id) })
+                fillUp
+            }
+        }
+    }
+
     val reminders: ReminderRepository = object : ReminderRepository {
         override suspend fun addReminder(reminder: ServiceReminder): ServiceReminder = access { db ->
             db.transaction {
@@ -346,7 +388,7 @@ class AndroidDatabase(
         }
     }
 
-    private class Helper(context: Context, name: String) : SQLiteOpenHelper(context, name, null, 3) {
+    private class Helper(context: Context, name: String) : SQLiteOpenHelper(context, name, null, 4) {
         init {
             setWriteAheadLoggingEnabled(true)
         }
@@ -404,6 +446,7 @@ class AndroidDatabase(
                     recorded_at_millis INTEGER NOT NULL
                 )
             """.trimIndent())
+            createFuelTable(db)
         }
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -424,7 +467,25 @@ class AndroidDatabase(
                 """.trimIndent())
                 version = 3
             }
+            if (version < 4) {
+                createFuelTable(db)
+                version = 4
+            }
             check(version == newVersion) { "No migration from schema $oldVersion to $newVersion" }
+        }
+
+        private fun createFuelTable(db: SQLiteDatabase) {
+            db.execSQL("""
+                CREATE TABLE fuel_fill_up (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    vin TEXT NOT NULL REFERENCES bike_profile(vin),
+                    filled_at_millis INTEGER NOT NULL,
+                    odometer_km REAL NOT NULL,
+                    liters REAL NOT NULL,
+                    full_tank INTEGER NOT NULL
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX fuel_vin_odometer_id ON fuel_fill_up(vin, odometer_km DESC, id DESC)")
         }
     }
 }
@@ -464,6 +525,20 @@ private fun SQLiteDatabase.findReminders(vin: String): List<ServiceReminder> = q
 private fun SQLiteDatabase.findReminder(id: Long): ServiceReminder? = query(
     "SELECT * FROM service_reminder WHERE id = ?", arrayOf(id.toString()), Cursor::reminder,
 ).singleOrNull()
+
+private fun SQLiteDatabase.findFillUps(vin: String): List<FuelFillUp> = query(
+    "SELECT * FROM fuel_fill_up WHERE vin = ? ORDER BY odometer_km DESC, id DESC",
+    arrayOf(vin), Cursor::fuelFillUp,
+)
+
+private fun SQLiteDatabase.findFillUp(id: Long): FuelFillUp? = query(
+    "SELECT * FROM fuel_fill_up WHERE id = ?", arrayOf(id.toString()), Cursor::fuelFillUp,
+).singleOrNull()
+
+private fun FuelFillUp.values(): ContentValues = values(
+    "vin" to vin, "filled_at_millis" to filledAtMillis, "odometer_km" to odometerKm,
+    "liters" to liters, "full_tank" to fullTank,
+)
 
 private fun ServiceReminder.values(): ContentValues = values(
     "vin" to vin, "title" to title, "description" to description,
@@ -527,6 +602,13 @@ private fun Cursor.reminder(): ServiceReminder = ServiceReminder(
     dueOdometerKm = nullableDouble("due_odometer_km"), dueDateMillis = nullableLong("due_date_millis"),
     repeatEveryKm = nullableDouble("repeat_every_km"), repeatEveryDays = nullableLong("repeat_every_days"),
     completed = long("completed") != 0L, completedAtMillis = nullableLong("completed_at_millis"), createdAtMillis = long("created_at_millis"),
+)
+
+private fun Cursor.fuelFillUp(): FuelFillUp = FuelFillUp(
+    id = long("id"), vin = string("vin"), filledAtMillis = long("filled_at_millis"),
+    odometerKm = getDouble(getColumnIndexOrThrow("odometer_km")),
+    liters = getDouble(getColumnIndexOrThrow("liters")),
+    fullTank = long("full_tank") != 0L,
 )
 
 private fun Cursor.bike(): BikeProfile = BikeProfile(

@@ -9,15 +9,16 @@ This is an interoperability research project, not an official Bajaj app. Initial
 - **Persistent sign-in:** Android Keystore-backed AES-GCM storage for credentials and tokens; silent re-authentication when tokens are rejected.
 - **Offline bike details:** the matching VIN's model/nickname is cached locally; a failed background refresh does not block local records.
 - **Manual trip log:** enter start/end odometer readings, resume an unfinished trip after restarting, and browse paginated history with distance and duration.
+- **Fuel economy from manual fill-ups:** record the odometer and litres at the pump. Full-to-full intervals count partial fill-ups in between and show L/100 km plus km/L. A fill-up also raises the reminder odometer when it is higher.
 - **Service reminders:** create reminders with a due odometer, a calendar date, or both; mark them complete. Either threshold makes a reminder due, whichever comes first.
 - **Optional background alerts:** local WorkManager checks notify you of due reminders, with Android permission/channel controls, persistent duplicate suppression, and sign-out/opt-out cancellation.
 - **Bike link foundation:** scan for nearby BLE devices, remember the selected bike per VIN, connect and inspect raw GATT services, and optionally auto-connect while the app is in the foreground.
 - **Background mirroring and boot resume:** a `connectedDevice` foreground service keeps the bike link alive when the app is backgrounded and holds a passive GATT connection so the link reattaches when the bike is switched on; after reboot the link resumes when mirroring, background mode and boot resume are all on and a bike is selected. Mirroring, background and boot are all on by default on a fresh install.
 - **Opt-in battery and signal mirroring:** send only the verified idle phone-status frame to the cluster, with MTU-safe writes. Session-scoped and read-only CONTROL polling for diagnostics. No cluster telemetry is decoded yet.
-- **Per-bike persistence:** Android-native SQLite stores profiles, trips, telemetry records and reminders in app-private storage.
+- **Per-bike persistence:** Android-native SQLite stores profiles, trips, telemetry records, reminders and fuel fill-ups in app-private storage.
 - **Safe recovery:** failed local reads offer a read-only retry; a failed refresh after a successful save does not invite duplicate writes.
 
-The reminder odometer is a recorded trip reading, **not live vehicle data**. Reminder dates use the device's time zone. Trips are manually entered, not automatically captured or synced with Bajaj. The Bluetooth screen shows raw GATT services and an experimental, opt-in battery/signal mirror; it does not decode cluster values or create trips.
+The reminder odometer and fuel economy use recorded fill-up or trip readings, **not live vehicle data**. Reminder dates use the device's time zone. Trips and fill-ups are manually entered, not automatically captured or synced with Bajaj. The Bluetooth screen shows raw GATT services and an experimental, opt-in battery/signal mirror; it does not decode cluster values or create trips.
 
 ## Bike link and phone-status mirroring
 
