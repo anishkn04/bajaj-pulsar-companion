@@ -137,7 +137,7 @@ already riding. Make health and failures visible without opening the app.
 
 ## P4 — Bigger bets
 
-- [ ] **PC-22 — Fuel economy from manual fill-ups.**
+- [x] **PC-22 — Fuel economy from manual fill-ups.** (`483d0e8`)
   Record liters and odometer at fill-up; compute consumption between fill-ups. No protocol
   decoding required. Acceptance: handles partial fill-ups and rejects non-increasing odometers.
 
