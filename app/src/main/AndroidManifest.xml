@@ -55,6 +55,19 @@
             android:name=".notifications.ReminderActionReceiver"
             android:exported="false" />
 
+        <!-- Quick Settings tile. Only the system may bind it, and it reuses the app-scoped bike
+             link state so the tile and the Bike link screen cannot disagree. -->
+        <service
+            android:name=".ble.BikeLinkTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_bluetooth"
+            android:label="@string/bike_link_tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
         <!-- Resumes the link after reboot when background mode + boot resume are on. -->
         <receiver
             android:name=".ble.BootReceiver"

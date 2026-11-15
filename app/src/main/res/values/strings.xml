@@ -7,4 +7,18 @@
     <string name="bike_link_notification_title_named">Pulsar Connect — %1$s</string>
     <string name="bike_link_pause_action">Pause mirroring</string>
     <string name="bike_link_stop_action">Stop mirroring</string>
+
+    <!-- Quick Settings tile -->
+    <string name="bike_link_tile_label">Bike link</string>
+    <string name="bike_link_tile_content_description">Bike link: %1$s</string>
+    <string name="bike_link_tile_no_bike">Open the app to choose a bike</string>
+    <string name="bike_link_tile_mirroring_off">Mirroring is off — open the app to arm it</string>
+    <string name="bike_link_tile_bluetooth_off">Bluetooth is off — open the app</string>
+    <string name="bike_link_tile_missing_permissions">Bluetooth permission needed — open the app</string>
+    <string name="bike_link_tile_connected">Connected</string>
+    <string name="bike_link_tile_connecting">Connecting…</string>
+    <string name="bike_link_tile_reconnecting">Reconnecting…</string>
+    <string name="bike_link_tile_waiting">Waiting for the bike</string>
+    <string name="bike_link_tile_disconnected">Disconnected — tap to connect</string>
+    <string name="bike_link_tile_failed">Connection failed — tap to retry</string>
 </resources>
