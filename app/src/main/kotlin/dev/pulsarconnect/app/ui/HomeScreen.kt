@@ -104,11 +104,7 @@ internal fun HomeScreen(
         HomeFeatureCard(
             title = "Trips",
             value = "${state.trips.count { it.endTime != null }}${if (state.hasMoreTrips) "+" else ""} saved trips",
-            detail = if (state.activeTrip != null) {
-                "A manual trip is in progress."
-            } else {
-                "Manually record start and end odometer readings."
-            },
+            detail = if (state.activeTrip != null) "A manual trip is in progress." else null,
             actionLabel = "View trips",
             onAction = onTrips,
         )
@@ -169,7 +165,6 @@ private fun QuickOdometerCard(state: UiState.SignedIn, onUpdateOdometer: (String
             onValueChange = { input = it },
             label = { Text("New reading (km)") },
             placeholder = { Text("1234.5") },
-            supportingText = { Text("Reminder due status updates; trip history is unchanged.") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
             singleLine = true,
             enabled = !state.busy,
@@ -215,15 +210,17 @@ private fun RecordSummaryCard(state: UiState.SignedIn, now: Long) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text(
-            text = next?.title ?: "Nothing pending",
+            text = next?.title ?: "No pending service reminders.",
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onSurface,
         )
-        Text(
-            text = next?.let { reminderTimingLabel(it, now) } ?: "No pending service reminders.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        next?.let {
+            Text(
+                text = reminderTimingLabel(it, now),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
@@ -292,21 +289,11 @@ private fun SetupHealthCard(
                             MaterialTheme.colorScheme.primary
                         },
                     )
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            text = item.title,
-                            style = MaterialTheme.typography.titleSmall,
-                        )
-                        Text(
-                            text = item.status,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (item.needsAttention) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        )
-                    }
+                    Text(
+                        text = item.title,
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.weight(1f),
+                    )
                 }
                 if (item.needsAttention) {
                     Text(
@@ -318,13 +305,6 @@ private fun SetupHealthCard(
                 }
             }
         }
-        if (!health.ready) {
-            Text(
-                text = "Tap an item to open the setting that fixes it.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
     }
 }
 
@@ -332,7 +312,7 @@ private fun SetupHealthCard(
 private fun HomeFeatureCard(
     title: String,
     value: String,
-    detail: String,
+    detail: String?,
     actionLabel: String,
     onAction: () -> Unit,
 ) {
@@ -347,11 +327,13 @@ private fun HomeFeatureCard(
             style = MaterialTheme.typography.titleLarge,
             color = MaterialTheme.colorScheme.onSurface,
         )
-        Text(
-            text = detail,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        detail?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         CardLink(label = actionLabel, onClick = onAction)
     }
 }

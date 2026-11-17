@@ -14,9 +14,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CardDefaults
@@ -245,17 +242,6 @@ internal fun PulsarSwitchRow(
             checked = checked,
             onCheckedChange = null,
             enabled = enabled,
-            thumbContent = if (checked) {
-                {
-                    Icon(
-                        Icons.Filled.Check,
-                        contentDescription = null,
-                        modifier = Modifier.size(SwitchDefaults.IconSize),
-                    )
-                }
-            } else {
-                null
-            },
             colors = SwitchDefaults.colors(
                 checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
                 checkedTrackColor = MaterialTheme.colorScheme.primary,
@@ -283,18 +269,12 @@ internal fun StatusPill(text: String, tone: StatusTone = StatusTone.Neutral) {
             MaterialTheme.colorScheme.onPrimaryContainer
     }
     Surface(shape = CircleShape, color = colors.first) {
-        Row(
+        Text(
+            text,
+            style = MaterialTheme.typography.labelSmall,
+            color = colors.second,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Surface(
-                modifier = Modifier.size(6.dp),
-                shape = CircleShape,
-                color = colors.second,
-            ) {}
-            Text(text, style = MaterialTheme.typography.labelSmall, color = colors.second)
-        }
+        )
     }
 }
 
@@ -349,30 +329,19 @@ internal fun AlertCard(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.Top,
-            ) {
-                Icon(
-                    Icons.Outlined.ErrorOutline,
-                    contentDescription = null,
-                    modifier = Modifier.size(20.dp),
-                    tint = MaterialTheme.colorScheme.error,
-                )
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    title?.let {
-                        Text(
-                            it,
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                        )
-                    }
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                title?.let {
                     Text(
-                        message,
-                        style = MaterialTheme.typography.bodySmall,
+                        it,
+                        style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.onErrorContainer,
                     )
                 }
+                Text(
+                    message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                )
             }
             if (actionLabel != null && onAction != null) {
                 PillButton(
@@ -428,20 +397,10 @@ internal fun LocalDataStatus(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (state.localLoading || state.busy) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(18.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                Text(
-                    if (state.localLoading) "Loading saved records…" else "Saving…",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
+            Text(
+                if (state.localLoading) "Loading saved records…" else "Saving…",
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
         if (state.localLoadFailed) {
             AlertCard(

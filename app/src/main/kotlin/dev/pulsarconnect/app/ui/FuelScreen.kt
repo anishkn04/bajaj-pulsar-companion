@@ -72,7 +72,6 @@ internal fun FuelScreen(
                 ScreenHeader(
                     eyebrow = "Fuel",
                     title = "Economy",
-                    subtitle = "Full-to-full consumption from your manual fill-ups.",
                 )
             }
         }
@@ -85,12 +84,6 @@ internal fun FuelScreen(
                     style = MaterialTheme.typography.titleLarge,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
-                Text(
-                    text = "Record the odometer and litres at the pump. Mark a fill-up as full " +
-                        "when the tank is filled to the same level as the previous full tank.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
                 PillButton(
                     label = "Log fill-up",
                     onClick = { logging = true },
@@ -101,10 +94,7 @@ internal fun FuelScreen(
         item { SectionHeader("Fill-ups (${state.fillUps.size})") }
         if (state.fillUps.isEmpty() && !state.localLoading && !state.localLoadFailed) {
             item {
-                EmptyState(
-                    "No fill-ups yet. Log two full-tank fill-ups to see fuel economy. " +
-                        "Partial fill-ups between them are counted automatically.",
-                )
+                EmptyState("No fill-ups yet. Log two full-tank fill-ups.")
             }
         }
         items(state.fillUps) { fillUp ->
@@ -168,12 +158,6 @@ private fun FuelEconomyCard(economy: FuelEconomy) {
                 text = "Not enough full fill-ups yet",
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onSurface,
-            )
-            Text(
-                text = "Log two full-tank fill-ups. Partial fill-ups in between count toward the " +
-                    "next full-to-full interval.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } else {
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -305,7 +289,7 @@ private fun LogFillUpDialog(
                 )
                 PulsarSwitchRow(
                     title = "Full tank",
-                    description = "Closes a full-to-full interval. Leave off for a partial fill.",
+                    description = null,
                     checked = fullTank,
                     onCheckedChange = { fullTank = it },
                 )
@@ -336,7 +320,7 @@ internal fun fuelSummaryValue(fillUps: List<FuelFillUp>): String =
 /** Supporting line used by the Home card. */
 internal fun fuelSummaryDetail(fillUps: List<FuelFillUp>): String {
     val latest = fuelEconomy(fillUps).latest
-        ?: return "Log two full-tank fill-ups to calculate consumption."
+        ?: return "Log two full-tank fill-ups."
     return "${formatRecordNumber(latest.distanceKm)} km on " +
         "${formatRecordNumber(latest.liters)} L since the last full tank."
 }
