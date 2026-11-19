@@ -58,6 +58,7 @@ import dev.pulsarconnect.core.ble.ConnectionState
 import dev.pulsarconnect.core.ble.ControlProtocol
 import dev.pulsarconnect.core.ble.DiscoveredDevice
 import dev.pulsarconnect.core.ble.LinkLogEntry
+import dev.pulsarconnect.core.ble.NavWireMode
 import dev.pulsarconnect.core.ble.exportLinkLog
 import java.time.Instant
 import java.time.ZoneId
@@ -79,6 +80,8 @@ internal fun BikeConnectionScreen(
     onPhoneStatusChange: (Boolean) -> Unit,
     onCallerNameChange: (Boolean) -> Unit,
     onMissedCallChange: (Boolean) -> Unit,
+    onNavigationMirrorChange: (Boolean) -> Unit = {},
+    onNavWireModeChange: (NavWireMode) -> Unit = {},
     onOpenNotificationSettings: () -> Unit,
     onRefresh: () -> Unit,
     onClearError: () -> Unit,
@@ -314,6 +317,73 @@ internal fun BikeConnectionScreen(
                                 },
                             )
                         }
+                    }
+                }
+            }
+
+            item {
+                val navReady = bleState.phoneStatusAvailable &&
+                    bleState.phoneStatusEnabled &&
+                    bleState.notificationAccessGranted
+                PulsarCard {
+                    Text(
+                        "Navigation mirror (Experimental)",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    PulsarSwitchRow(
+                        title = "Google Maps & Organic Maps",
+                        description = "Sends <=30-byte ASCII turn cues over the caller-name BLE slot. Real calls always take priority.",
+                        checked = bleState.navigationMirrorEnabled,
+                        onCheckedChange = onNavigationMirrorChange,
+                        enabled = navReady,
+                    )
+                    if (bleState.navigationMirrorEnabled) {
+                        PulsarDivider()
+                        Text(
+                            "Wire call-state mode",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            PillButton(
+                                label = "Active call (3)",
+                                onClick = { onNavWireModeChange(NavWireMode.ACTIVE_CALL) },
+                                modifier = Modifier.weight(1f),
+                                style = if (bleState.navWireMode == NavWireMode.ACTIVE_CALL) {
+                                    PillStyle.Filled
+                                } else {
+                                    PillStyle.Outlined
+                                },
+                            )
+                            PillButton(
+                                label = "Incoming call (1)",
+                                onClick = { onNavWireModeChange(NavWireMode.INCOMING_CALL) },
+                                modifier = Modifier.weight(1f),
+                                style = if (bleState.navWireMode == NavWireMode.INCOMING_CALL) {
+                                    PillStyle.Filled
+                                } else {
+                                    PillStyle.Outlined
+                                },
+                            )
+                        }
+                        Text(
+                            text = bleState.navMirrorPreview?.let { cue ->
+                                "Wire preview (${cue.toByteArray(Charsets.UTF_8).size}/30 B): $cue"
+                            } ?: "Waiting for active Google Maps or Organic Maps route",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else if (!bleState.notificationAccessGranted) {
+                        Text(
+                            "Notification access is needed so the app can read ongoing turn-by-turn notifications without location permission.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
             }

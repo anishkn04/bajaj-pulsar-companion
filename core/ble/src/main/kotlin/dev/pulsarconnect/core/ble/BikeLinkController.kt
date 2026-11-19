@@ -20,6 +20,7 @@ data class BikeLinkState(
     val callerMirroringAvailable: Boolean = false,
     val missedCallMirroringAvailable: Boolean = false,
     val passiveWait: PassiveWaitState = PassiveWaitState.OFF,
+    val navMirrorPreview: String? = null,
 )
 
 /**
@@ -37,6 +38,7 @@ class BikeLinkController(
     statuses: Flow<PhoneStatus>,
     private val scope: CoroutineScope,
     callEvents: Flow<CallEvent> = emptyFlow(),
+    navEvents: Flow<NavEvent> = emptyFlow(),
 ) {
     private val sender = PhoneStatusSender(
         connection = connection,
@@ -49,6 +51,17 @@ class BikeLinkController(
                 callerName = settings.mirrorCallerName,
                 missedCalls = settings.mirrorMissedCalls,
             )
+        },
+        navEvents = navEvents,
+        navOptions = {
+            val settings = preferences.settings.value
+            NavMirrorOptions(
+                enabled = settings.mirrorNavigation,
+                wireMode = settings.navWireMode,
+            )
+        },
+        onNavPreview = { preview ->
+            _state.update { it.copy(navMirrorPreview = preview) }
         },
         onStopped = ::onMirroringStopped,
         onSent = ::onMirroringSent,
@@ -205,6 +218,19 @@ class BikeLinkController(
     /** Opt-in missed-call icon. The frame carries no name or number. */
     fun setMirrorMissedCalls(enabled: Boolean) {
         preferences.setMirrorMissedCalls(enabled)
+    }
+
+    /** Opt-in experimental turn-by-turn navigation cue via the 30-byte caller-text slot. */
+    fun setMirrorNavigation(enabled: Boolean) {
+        preferences.setMirrorNavigation(enabled)
+        if (!enabled) {
+            _state.update { it.copy(navMirrorPreview = null) }
+        }
+    }
+
+    /** Switch between ACTIVE_CALL and INCOMING_CALL wire modes for live cluster testing. */
+    fun setNavWireMode(mode: NavWireMode) {
+        preferences.setNavWireMode(mode)
     }
 
     fun select(device: DiscoveredDevice) {
@@ -431,6 +457,12 @@ class BikeLinkController(
         }
         if (previous.mirrorMissedCalls != current.mirrorMissedCalls) {
             record(if (current.mirrorMissedCalls) "Missed-call mirroring on" else "Missed-call mirroring off")
+        }
+        if (previous.mirrorNavigation != current.mirrorNavigation) {
+            record(if (current.mirrorNavigation) "Navigation mirroring on" else "Navigation mirroring off")
+        }
+        if (previous.navWireMode != current.navWireMode) {
+            record("Navigation wire mode: ${current.navWireMode.name}")
         }
         if (previous.armedVin != current.armedVin) {
             record(if (current.armedVin != null) "Bike armed for background link" else "Bike unarmed")

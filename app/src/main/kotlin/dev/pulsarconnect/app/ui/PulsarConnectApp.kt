@@ -259,6 +259,8 @@ private fun SignedInScreen(
                         onPhoneStatusChange = bleViewModel::setMirroring,
                         onCallerNameChange = bleViewModel::setMirrorCallerName,
                         onMissedCallChange = bleViewModel::setMirrorMissedCalls,
+                        onNavigationMirrorChange = bleViewModel::setMirrorNavigation,
+                        onNavWireModeChange = bleViewModel::setNavWireMode,
                         onOpenNotificationSettings = {
                             openNotificationAccessSettings(context)
                         },

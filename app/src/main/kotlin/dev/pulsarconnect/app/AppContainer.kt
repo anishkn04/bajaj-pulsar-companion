@@ -20,6 +20,8 @@ import dev.pulsarconnect.app.ble.PhoneStatusSource
 import dev.pulsarconnect.app.calls.CallNotificationBus
 import dev.pulsarconnect.app.calls.CallNotificationParser
 import dev.pulsarconnect.app.data.AndroidDatabase
+import dev.pulsarconnect.app.nav.NavNotificationBus
+import dev.pulsarconnect.app.nav.NavNotificationParser
 import dev.pulsarconnect.app.notifications.ReminderActionBus
 import dev.pulsarconnect.app.notifications.ReminderActionHandler
 import dev.pulsarconnect.app.notifications.ReminderNotificationManager
@@ -88,6 +90,10 @@ class AppContainer(context: Context) {
     val phoneCallSource: PhoneCallSource =
         AndroidPhoneCallSource(context.applicationContext, callNotificationBus)
 
+    /** Process-local navigation-notification hand-off for Google Maps and Organic Maps. */
+    val navNotificationBus = NavNotificationBus()
+    val navNotificationParser = NavNotificationParser()
+
     /** Persistent bike-link intent (mirroring, background, boot, armed VIN). */
     val bikeLinkPreferences: BikeLinkPreferences = AndroidBikeLinkPreferences(context.applicationContext)
 
@@ -103,6 +109,7 @@ class AppContainer(context: Context) {
             statuses = phoneStatusSource.statuses(),
             scope = appScope,
             callEvents = phoneCallSource.events(),
+            navEvents = navNotificationBus.events,
         )
     }
 

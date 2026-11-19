@@ -75,6 +75,44 @@ object PhoneStatusProtocol {
         heartbeat: Int,
         callState: CallState = CallState.NO_CALL,
         callerName: String? = null,
+    ): ByteArray = encodeInternal(
+        status = status,
+        heartbeat = heartbeat,
+        callState = callState,
+        textBytes = if (callState == CallState.INCOMING_CALL || callState == CallState.ACTIVE_CALL) {
+            CallerName.wireBytes(callerName)
+        } else {
+            null
+        },
+    )
+
+    /**
+     * GENERAL frame carrying an experimental turn-by-turn navigation cue in the 30-byte caller-text
+     * slot. Only [CallState.INCOMING_CALL] and [CallState.ACTIVE_CALL] are valid because only those
+     * call states carry text on the wire.
+     */
+    fun encodeNavigation(
+        status: PhoneStatus,
+        heartbeat: Int,
+        callState: CallState,
+        navText: String,
+    ): ByteArray {
+        require(callState == CallState.INCOMING_CALL || callState == CallState.ACTIVE_CALL) {
+            "Navigation text requires INCOMING_CALL or ACTIVE_CALL"
+        }
+        return encodeInternal(
+            status = status,
+            heartbeat = heartbeat,
+            callState = callState,
+            textBytes = NavText.wireBytes(navText),
+        )
+    }
+
+    private fun encodeInternal(
+        status: PhoneStatus,
+        heartbeat: Int,
+        callState: CallState,
+        textBytes: ByteArray?,
     ): ByteArray {
         require(heartbeat in 0..255) { "Heartbeat must be in 0..255" }
         val battery = status.batteryPercent ?: 0
@@ -91,10 +129,11 @@ object PhoneStatusProtocol {
             this[2] = (status.signalLevel ?: 0).toByte()
             this[3] = if (callState == CallState.ACTIVE_CALL) 1 else 0
             this[4] = if (callState == CallState.ACTIVE_CALL) 0 else 1
-            if (callState == CallState.INCOMING_CALL || callState == CallState.ACTIVE_CALL) {
-                val text = CallerName.wireBytes(callerName)
-                this[CALLER_LENGTH_OFFSET] = text.size.toByte()
-                text.copyInto(this, CALLER_TEXT_OFFSET)
+            if (textBytes != null &&
+                (callState == CallState.INCOMING_CALL || callState == CallState.ACTIVE_CALL)
+            ) {
+                this[CALLER_LENGTH_OFFSET] = textBytes.size.toByte()
+                textBytes.copyInto(this, CALLER_TEXT_OFFSET)
             }
             this[53] = heartbeat.toByte()
         }
