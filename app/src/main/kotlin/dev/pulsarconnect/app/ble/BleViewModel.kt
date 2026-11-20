@@ -13,6 +13,7 @@ import dev.pulsarconnect.core.ble.ClusterControlState
 import dev.pulsarconnect.core.ble.ConnectionState
 import dev.pulsarconnect.core.ble.DiscoveredDevice
 import dev.pulsarconnect.core.ble.LinkLogEntry
+import dev.pulsarconnect.core.ble.NavWireMode
 import dev.pulsarconnect.core.ble.PassiveWaitState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -47,6 +48,8 @@ data class BleUiState(
     val missedCallAvailable: Boolean = false,
     val notificationAccessGranted: Boolean = false,
     val navigationMirrorEnabled: Boolean = false,
+    val navWireMode: NavWireMode = NavWireMode.ACTIVE_CALL,
+    val navMirrorPreview: String? = null,
     val settings: BikeLinkSettings = BikeLinkSettings(),
     val controlState: ClusterControlState = ClusterControlState(),
     val passiveWait: PassiveWaitState = PassiveWaitState.OFF,
@@ -122,6 +125,8 @@ class BleViewModel(
                         callerNameAvailable = link.callerMirroringAvailable,
                         missedCallAvailable = link.missedCallMirroringAvailable,
                         navigationMirrorEnabled = link.settings.mirrorNavigation,
+                        navWireMode = link.settings.navWireMode,
+                        navMirrorPreview = link.navMirrorPreview,
                         passiveWait = link.passiveWait,
                     )
                 }
@@ -285,9 +290,14 @@ class BleViewModel(
         controller.setMirrorMissedCalls(enabled)
     }
 
-    /** Opt-in turn-by-turn navigation mirroring over the cluster's negotiated transport. */
+    /** Opt-in experimental TBT navigation cues via the 30-byte caller-text slot. */
     fun setMirrorNavigation(enabled: Boolean) {
         controller.setMirrorNavigation(enabled)
+    }
+
+    /** Switch between ACTIVE_CALL and INCOMING_CALL wire modes for cluster testing. */
+    fun setNavWireMode(mode: NavWireMode) {
+        controller.setNavWireMode(mode)
     }
 
     fun clearError() {

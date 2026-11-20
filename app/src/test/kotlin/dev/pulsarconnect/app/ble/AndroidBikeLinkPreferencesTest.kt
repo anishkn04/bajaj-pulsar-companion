@@ -88,13 +88,16 @@ class AndroidBikeLinkPreferencesTest {
     }
 
     @Test
-    fun `navigation mirroring defaults off and persists`() {
+    fun `navigation mirroring defaults off and wire mode persists`() {
         val first = AndroidBikeLinkPreferences(context)
         assertFalse(first.settings.value.mirrorNavigation)
+        assertEquals(dev.pulsarconnect.core.ble.NavWireMode.ACTIVE_CALL, first.settings.value.navWireMode)
 
         first.setMirrorNavigation(true)
+        first.setNavWireMode(dev.pulsarconnect.core.ble.NavWireMode.INCOMING_CALL)
 
         val reloaded = AndroidBikeLinkPreferences(context).settings.value
         assertTrue(reloaded.mirrorNavigation)
+        assertEquals(dev.pulsarconnect.core.ble.NavWireMode.INCOMING_CALL, reloaded.navWireMode)
     }
 }

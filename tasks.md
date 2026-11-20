@@ -154,12 +154,11 @@ already riding. Make health and failures visible without opening the app.
   Blocked on decoding the bike's telemetry/odometer frames. Unblocks when a targeted HCI snoop
   capture with a known route and odometer readings is available and decoded. Do not guess
   frames or ship unverified decoding.
-- [x] **PC-26 — Real navigation transport.**
-  Replace fake call-state cues with a structured `NavCue` and the writable 48-byte TBT frame on
-  `0110676e…`. Keep capability-gated ALERT and incoming-call text fallbacks, with no wire-mode
-  selector and never `ACTIVE_CALL`. Move the opt-in switch to Settings so it is available before
-  the bike connects, gated only on notification access. Add TBT encoder, transport-selection,
-  parser and no-fake-call regression tests. Live cluster confirmation is the remaining manual step.
+- [~] **PC-26 — Prefer maneuver arrows in navigation mirror.**
+  When a supported navigation notification contains a recognizable maneuver, mirror the compact
+  arrow and distance (for example `> 100m`) instead of the destination road name. Preserve the
+  road-name fallback when no maneuver is recognized. Acceptance: Google Maps and Organic Maps
+  parser tests cover arrow-plus-distance output and fallback behavior.
 
 ## Recently completed
 
@@ -174,8 +173,7 @@ Keep this list short; full history is in `git log`.
 
 ## Standing constraints for every task
 
-See `AGENT.md`. In short: Kotlin only; Material icons; no turn-by-turn/alerts except the
-approved evidence-gated navigation mirror; no vehicle-specific constants; never commit secrets,
-captures, VINs, or MACs; do not push a release tag unless asked; preserve BLE/session, mirroring,
-background service, boot resume, reminders, permissions, diagnostics, the safety disclaimer, and
-sign-out behavior.
+See `AGENT.md`. In short: Kotlin only; Material icons; no turn-by-turn/alerts; no
+vehicle-specific constants; never commit secrets, captures, VINs, or MACs; do not push a
+release tag unless asked; preserve BLE/session, mirroring, background service, boot resume,
+reminders, permissions, diagnostics, the safety disclaimer, and sign-out behavior.

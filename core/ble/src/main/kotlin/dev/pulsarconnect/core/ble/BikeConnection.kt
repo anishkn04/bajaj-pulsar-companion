@@ -182,6 +182,7 @@ class BikeConnection(
         heartbeat: Int,
         callState: CallState = CallState.NO_CALL,
         callerName: String? = null,
+        navText: String? = null,
     ): Boolean {
         currentCoroutineContext().ensureActive()
         val version = generation
@@ -197,7 +198,13 @@ class BikeConnection(
         if (mtu < PhoneStatusProtocol.REQUIRED_MTU) {
             throw BleException(BleFailure.MtuTooSmall(PhoneStatusProtocol.REQUIRED_MTU, mtu))
         }
-        val bytes = PhoneStatusProtocol.encode(status, heartbeat, callState, callerName)
+        val bytes = if (navText != null &&
+            (callState == CallState.INCOMING_CALL || callState == CallState.ACTIVE_CALL)
+        ) {
+            PhoneStatusProtocol.encodeNavigation(status, heartbeat, callState, navText)
+        } else {
+            PhoneStatusProtocol.encode(status, heartbeat, callState, callerName)
+        }
         if (!isCurrent()) return false
         // Never re-read session for the write: a replacement must not receive this payload.
         activeSession.write(
@@ -208,96 +215,6 @@ class BikeConnection(
         )
         currentCoroutineContext().ensureActive()
         // An automatic reconnect can replace the session without changing the run generation.
-        return isCurrent()
-    }
-
-    /**
-     * Sends a navigation cue using the best transport the cluster advertises: the dedicated TBT
-     * display, then the SMS/alert text endpoint, then the legacy incoming-call text slot.
-     *
-     * The caller must ensure no real call is ringing or active: navigation must never preempt a
-     * call, and the last-resort fallback always uses [CallState.INCOMING_CALL] rather than
-     * ACTIVE_CALL so the cluster cannot show call duration for a route cue.
-     */
-    suspend fun sendNavigation(
-        status: PhoneStatus,
-        heartbeat: Int,
-        cue: NavCue,
-        fallbackText: String,
-    ): Boolean {
-        currentCoroutineContext().ensureActive()
-        val version = generation
-        val connected = _state.value as? ConnectionState.Connected ?: return false
-        val activeSession = session ?: return false
-        fun isCurrent(): Boolean = version == generation && session === activeSession &&
-            _state.value === connected
-        if (!isCurrent()) return false
-
-        when (NavTransportResolver.select(connected.services)) {
-            NavTransport.TBT -> {
-                val mtu = activeSession.requestMtu(TbtProtocol.REQUIRED_MTU)
-                if (mtu < TbtProtocol.REQUIRED_MTU) return false
-                if (!isCurrent()) return false
-                activeSession.write(
-                    TbtProtocol.SERVICE_UUID,
-                    TbtProtocol.TBT_UUID,
-                    TbtProtocol.encode(cue),
-                    withResponse = true,
-                )
-            }
-            NavTransport.ALERT -> {
-                val mtu = activeSession.requestMtu(AlertProtocol.REQUIRED_MTU)
-                if (mtu < AlertProtocol.REQUIRED_MTU) return false
-                if (!isCurrent()) return false
-                activeSession.write(
-                    AlertProtocol.SERVICE_UUID,
-                    AlertProtocol.ALERT_UUID,
-                    AlertProtocol.encode(fallbackText, System.currentTimeMillis() / 1_000),
-                    withResponse = true,
-                )
-            }
-            NavTransport.CALL_TEXT -> {
-                val text = NavText.wireBytes(fallbackText)
-                if (text.isEmpty()) return false
-                val mtu = activeSession.requestMtu(PhoneStatusProtocol.PREFERRED_MTU)
-                if (mtu < PhoneStatusProtocol.REQUIRED_MTU) return false
-                if (!isCurrent()) return false
-                activeSession.write(
-                    PhoneStatusProtocol.SERVICE_UUID,
-                    PhoneStatusProtocol.GENERAL_UUID,
-                    PhoneStatusProtocol.encodeIncomingCallText(status, heartbeat, text),
-                    withResponse = true,
-                )
-            }
-            null -> return false
-        }
-        currentCoroutineContext().ensureActive()
-        return isCurrent()
-    }
-
-    /**
-     * Clears a navigation cue. TBT clusters get one explicit stop frame; the text fallback needs
-     * no frame because the next periodic GENERAL status is idle.
-     */
-    suspend fun sendNavigationEnded(): Boolean {
-        currentCoroutineContext().ensureActive()
-        val version = generation
-        val connected = _state.value as? ConnectionState.Connected ?: return false
-        val activeSession = session ?: return false
-        fun isCurrent(): Boolean = version == generation && session === activeSession &&
-            _state.value === connected
-        if (!TbtProtocol.isSupportedBy(connected.services)) return false
-        if (!isCurrent()) return false
-        val mtu = activeSession.requestMtu(TbtProtocol.REQUIRED_MTU)
-        if (mtu < TbtProtocol.REQUIRED_MTU) return false
-        if (!isCurrent()) return false
-        activeSession.write(
-            TbtProtocol.SERVICE_UUID,
-            TbtProtocol.TBT_UUID,
-            TbtProtocol.stopFrame(),
-            withResponse = true,
-        )
-        currentCoroutineContext().ensureActive()
         return isCurrent()
     }
 

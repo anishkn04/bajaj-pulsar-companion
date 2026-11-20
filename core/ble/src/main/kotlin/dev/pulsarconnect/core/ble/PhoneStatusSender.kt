@@ -18,10 +18,10 @@ import kotlinx.coroutines.yield
  *
  * Battery/signal always flow at the native cadence. Call events are opt-in through
  * [callOptions]: caller text is added to the GENERAL frame while ringing/active, and a missed
- * call triggers one fixed MISS_CALL frame ahead of the next status frame. Navigation cues are
- * opt-in through [navOptions] and use the bike's dedicated TBT display when available, falling
- * back to the incoming-call text slot only on clusters without one. A real call always wins.
- * There is a single writer loop, so call, nav, and status frames can never interleave.
+ * call triggers one fixed MISS_CALL frame ahead of the next status frame. Experimental turn-by-turn
+ * navigation cues are opt-in through [navOptions] and ride in the same 30-byte text slot only
+ * when no real phone call is ringing or active. There is a single writer loop, so call, nav, and
+ * status frames can never interleave.
  *
  * The caller owns start/stop. [onStopped] runs once when the loop exits on its own: with a
  * failure when sending failed, or with `null` after a clean stop such as a disconnect or an
@@ -84,22 +84,19 @@ class PhoneStatusSender(
             coroutineScope {
                 val latest = MutableStateFlow<PhoneStatus?>(null)
                 val call = MutableStateFlow(CallSnapshot())
-                val nav = MutableStateFlow<NavCue?>(null)
+                val nav = MutableStateFlow<String?>(null)
                 val missedCallPending = AtomicBoolean(false)
-                val navEndPending = AtomicBoolean(false)
 
                 val statusJob = launch { statuses.collect { latest.value = it } }
                 val callJob = launch {
                     callEvents.collect { event ->
                         when (event) {
-                            is CallEvent.Incoming -> call.value = CallSnapshot(
-                                CallState.INCOMING_CALL,
-                                event.callerName.takeIf { callOptions().callerName },
-                            )
-                            is CallEvent.Active -> call.value = CallSnapshot(
-                                CallState.ACTIVE_CALL,
-                                event.callerName.takeIf { callOptions().callerName },
-                            )
+                            is CallEvent.Incoming -> if (callOptions().callerName) {
+                                call.value = CallSnapshot(CallState.INCOMING_CALL, event.callerName)
+                            }
+                            is CallEvent.Active -> if (callOptions().callerName) {
+                                call.value = CallSnapshot(CallState.ACTIVE_CALL, event.callerName)
+                            }
                             CallEvent.Ended -> call.value = CallSnapshot()
                             CallEvent.Missed -> if (callOptions().missedCalls) {
                                 missedCallPending.set(true)
@@ -111,11 +108,11 @@ class PhoneStatusSender(
                     navEvents.collect { event ->
                         when (event) {
                             is NavEvent.Update -> if (navOptions().enabled) {
-                                nav.value = event.cue
-                                onNavPreview(NavText.fallbackText(event.cue))
+                                val wire = NavText.wireText(event.text).ifEmpty { null }
+                                nav.value = wire
+                                onNavPreview(wire)
                             }
                             NavEvent.Ended -> {
-                                if (nav.value != null) navEndPending.set(true)
                                 nav.value = null
                                 onNavPreview(null)
                             }
@@ -134,9 +131,6 @@ class PhoneStatusSender(
                             status = latest.value
                             continue
                         }
-                        // A cleared route needs one TBT stop frame; keep it in the writer loop so
-                        // it can never overtake or be overtaken by a status write.
-                        if (navEndPending.getAndSet(false)) connection.sendNavigationEnded()
                         // The missed-call icon has priority over the periodic status frame. Re-check
                         // the switch at send time so disabling it cannot leak one last frame.
                         if (missedCallPending.getAndSet(false) && callOptions().missedCalls) {
@@ -145,8 +139,8 @@ class PhoneStatusSender(
                         val options = callOptions()
                         val navOpts = navOptions()
                         val snapshot = call.value
-                        val realCallActive = snapshot.state == CallState.INCOMING_CALL ||
-                            snapshot.state == CallState.ACTIVE_CALL
+                        val realCallActive = options.callerName &&
+                            (snapshot.state == CallState.INCOMING_CALL || snapshot.state == CallState.ACTIVE_CALL)
                         val activeNav = if (navOpts.enabled) nav.value else null
                         if (!navOpts.enabled && nav.value != null) {
                             nav.value = null
@@ -157,14 +151,14 @@ class PhoneStatusSender(
                             realCallActive -> connection.sendPhoneStatus(
                                 status = current,
                                 heartbeat = heartbeat,
-                                callState = if (options.callerName) snapshot.state else CallState.NO_CALL,
-                                callerName = if (options.callerName) snapshot.callerName else null,
+                                callState = snapshot.state,
+                                callerName = snapshot.callerName,
                             )
-                            activeNav != null -> connection.sendNavigation(
+                            activeNav != null -> connection.sendPhoneStatus(
                                 status = current,
                                 heartbeat = heartbeat,
-                                cue = activeNav,
-                                fallbackText = NavText.fallbackText(activeNav),
+                                callState = navOpts.wireMode.callState,
+                                navText = activeNav,
                             )
                             else -> connection.sendPhoneStatus(
                                 status = current,

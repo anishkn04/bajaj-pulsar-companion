@@ -154,8 +154,7 @@ This does not establish why the official app exhibits the reported login problem
 ## Still planned
 
 - **Bluetooth protocol decoding:** live cluster telemetry and automatic trip capture. Blocked on a targeted HCI snoop capture with the bike switched on; see [the BLE capture guide](docs/recon/BLE.md). No protocol is invented here.
-- Cloud trip sync and export/restore. (Navigation mirroring is implemented as the single approved
-  protocol exception; see [the BLE notes](docs/recon/BLE.md).)
+- Cloud trip sync, export/restore and navigation integration.
 - On-device testing with the bike and a connected Android phone, including a smoke test of background mirroring and boot resume on real hardware.
 
 ## Contributing

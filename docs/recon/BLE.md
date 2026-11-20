@@ -102,9 +102,9 @@ CONTROL map (zero-based offsets):
 | `[13]` | Launch media |
 
 Only verified frames may be transmitted. Caller name and missed-call frames are
-implemented, opt-in, and were confirmed on a live bike (see below). The approved navigation
-exception uses the real 48-byte turn-by-turn frame; ALERT text is only a capability-gated
-fallback. No other alert features are implemented.
+implemented, opt-in, and were confirmed on a live bike (see below). Alert and
+turn-by-turn frames are not implemented at all: the official Android app does not
+expose them as features.
 
 ## Call mirroring and privacy
 
@@ -234,53 +234,10 @@ still follow the native static layout:
 - MISS_CALL (`0310676e-6972-6565-6e69-676e4543544f`) is a 74-byte fixed trigger.
 - GENERAL caller text occupies byte 20 (UTF-8 length, capped at 30) and bytes
   21-50; the remaining bytes stay zero.
-- ALERT (`0410676e-6972-6565-6e69-676e4543544f`) is a navigation-text fallback only; see below.
+- ALERT (`0410676e-6972-6565-6e69-676e4543544f`) remains unimplemented.
 
 The app must never substitute a phone number for a missing name; unnamed callers
 get the generic `Incoming call` label.
-
-## Navigation frames: capability-gated
-
-A connected bike exposed the main service with writable `01…` (TBT), `02…` (GENERAL),
-`03…` (MISS_CALL), `04…` (ALERT) and `0a…` (CONTROL) characteristics. Only public UUIDs are
-recorded here; no device address or name is included.
-
-Transport is selected from advertised capabilities, with no rider-facing wire-mode selector:
-
-1. **TBT** — writable `0110676e-6972-6565-6e69-676e4543544f`, 48-byte frame.
-2. **ALERT** — writable `0410676e-6972-6565-6e69-676e4543544f`, 44-byte SMS frame, used only
-   when TBT is absent. It carries condensed text in the sender field and no maneuver glyph.
-3. **CALL_TEXT** — compact text in GENERAL's caller slot, used only when both above are absent.
-   It always uses `INCOMING_CALL`; navigation never sets `ACTIVE_CALL`, which would show call
-   duration. A real call always wins over navigation.
-
-The 48-byte TBT layout follows the public protocol findings for the official cluster link
-(`https://github.com/manov-ik/ride-relay/blob/main/docs/PROTOCOL.md`):
-
-| Offset | Size | Field |
-| --- | --- | --- |
-| 0 | 1 | bit0 update flag, bit4 step-distance unit (`1` metres), bit7 ETA PM |
-| 1 | 1 | maneuver icon id; official glyphs are 66-90, with `+32` when <100 m away |
-| 2-5 | 4 | step distance, little-endian 16.16 fixed point |
-| 6 | 1 | ETA minute |
-| 7 | 1 | ETA hour (1-12) in low nibble, roundabout exit in high nibble |
-| 8-11 | 4 | total distance, little-endian 16.16 fixed point |
-| 12 | 1 | bit0 total-distance unit, bits2-3 GPS status (`1` active) |
-| 13 | 1 | take-me-home ack (zero) |
-| 14 | 1 | street-text length, max 31 |
-| 15-45 | 31 | ASCII street text |
-| 46 | 1 | unused (zero) |
-| 47 | 1 | checksum: sum of bytes 0-46, masked to one byte |
-
-Distances below 1 km use metres; at or above 1 km they use kilometres with two decimal places.
-A zero-type frame with the link flags retained clears the cue. The notification parser produces
-only maneuver, step/total distance, arrival clock, roundabout exit and street text; route history
-is never stored or logged. Cluster rendering of this frame still needs a live confirmation with a
-route running.
-
-The 44-byte ALERT fallback layout is byte 0 alert type (`1` SMS), byte 1 sender length (max 32),
-bytes 2-33 sender text, bytes 34-37 big-endian epoch seconds and bytes 38-43 zero padding. There
-is no message body or direction glyph, so it is never preferred over TBT.
 
 Live speed/RPM/fuel/gear telemetry is still not established. The capture's ACTION
 characteristic (`0a10676e-6972-6565-6e69-676e4543544f`) returns 26-byte read

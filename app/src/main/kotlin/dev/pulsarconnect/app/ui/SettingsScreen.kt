@@ -11,8 +11,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -57,8 +55,6 @@ internal fun SettingsScreen(
     onMirroringChange: (Boolean) -> Unit,
     onBackgroundChange: (Boolean) -> Unit,
     onBootChange: (Boolean) -> Unit,
-    onNavigationMirrorChange: (Boolean) -> Unit,
-    onOpenNotificationAccessSettings: () -> Unit,
     onStopMirroring: () -> Unit,
     onExportBackup: (Boolean, suspend (String) -> Unit) -> Unit,
     onRestoreBackup: (String, RestoreMode) -> Unit,
@@ -212,28 +208,6 @@ internal fun SettingsScreen(
                 checked = bleState.settings.startOnBoot,
                 onCheckedChange = onBootChange,
             )
-        }
-
-        SectionCard(title = "Navigation") {
-            PulsarSwitchRow(
-                title = "Mirror navigation to cluster",
-                description = "Uses the cluster's navigation display when available. Real calls always take priority.",
-                checked = bleState.navigationMirrorEnabled,
-                onCheckedChange = onNavigationMirrorChange,
-                enabled = bleState.notificationAccessGranted,
-            )
-            if (!bleState.notificationAccessGranted) {
-                Text(
-                    "Notification access is needed so the app can read ongoing turn-by-turn notifications without location permission.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                CardLink(
-                    label = "Allow notification access",
-                    onClick = onOpenNotificationAccessSettings,
-                    icon = Icons.Outlined.Notifications,
-                )
-            }
         }
 
         if (bleState.settings.keepInBackground && !notificationGranted) {
