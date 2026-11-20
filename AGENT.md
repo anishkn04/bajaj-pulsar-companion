@@ -38,7 +38,9 @@ natives into the APK.
 
 - **Kotlin only.** Never add Java source to the app or core modules.
 - **Google Material icons only.** Do not add custom in-app vector icon drawables.
-- **No alerts or turn-by-turn features.** Navigation integration is out of scope.
+- **No alerts or turn-by-turn features, except the explicitly approved navigation mirroring
+  described below.** That one exception reuses the cluster's 30-byte incoming-call text slot;
+  do not add other alert or navigation behavior without a new rider decision.
 - **No vehicle-specific constants.** No hard-coded VIN, model quirks, or dealer access codes.
 - **Never commit secrets or personal data:** credentials, access codes, tokens, VINs, Bluetooth
   MAC addresses, notification captures, bugreports, APKs, AABs, keystores, or passwords.
@@ -52,6 +54,11 @@ natives into the APK.
   disarms them.
 - Caller-name and missed-call mirroring stay opt-in and **off by default**. Unknown callers show
   `"Incoming call"`. Never send or store a phone number.
+- Navigation mirroring is opt-in and **off by default**. It writes compact arrow, distance and
+  road cues through the incoming-call text slot only: wire call state is always `INCOMING_CALL`,
+  never `ACTIVE_CALL`, and a real call always wins. The N150 ignored native TBT frames and showed
+  only an icon for ALERT frames, so those transports are not implemented. The switch lives in
+  Settings and is available before the bike connects; notification access is its only gate.
 - Background reconnect must stay **low battery**: passive GATT (`autoConnect = true`) plus a
   watchdog, not periodic scanning or tight polling.
 - Do not push a release tag or create a release unless the rider explicitly asks.

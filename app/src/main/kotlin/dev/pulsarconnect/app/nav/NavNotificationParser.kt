@@ -20,6 +20,10 @@ data class NavNotificationSnapshot(
 /**
  * Condenses ongoing turn-by-turn notifications from Google Maps and Organic Maps into compact
  * ASCII strings (`<= 30` UTF-8 bytes) suitable for the Pulsar N150's 30-byte caller-text BLE slot.
+ *
+ * Cues are ordered `ARROW DISTANCE ROAD`: the maneuver glyph and step distance are always kept,
+ * and a road name is appended only while whole words still fit. Total route distance and ETA are
+ * deliberately ignored — the cluster has no room for them and they are not step instructions.
  */
 class NavNotificationParser(
     packages: Set<String> = DEFAULT_PACKAGES,
@@ -37,26 +41,17 @@ class NavNotificationParser(
         val combined = listOfNotNull(title, text).joinToString(" ").trim()
         if (combined.isEmpty()) return null
         if (NON_TURN_MARKERS.any { combined.equals(it, ignoreCase = true) }) return null
+        if (TRANSIENT_MARKERS.any { combined.contains(it, ignoreCase = true) }) return null
 
         val arrow = detectManeuverToken(combined)
         val distance = extractDistance(title) ?: extractDistance(text)
-        val target = extractTarget(title, text)
+        val road = extractRoad(title, text)
 
         val parts = buildList {
-            if (arrow != null) {
-                add(arrow)
-                if (distance != null) add(distance)
-            } else {
-                if (distance != null) add(distance)
-                if (!target.isNullOrEmpty()) add(abbreviateRoad(target))
-            }
+            arrow?.let(::add)
+            distance?.let(::add)
         }
-        val rawCue = if (parts.isNotEmpty()) {
-            parts.joinToString(" ")
-        } else {
-            abbreviateRoad(combined)
-        }
-        return NavText.wireText(rawCue).ifEmpty { null }
+        return fitCue(parts, road).takeIf { it.isNotEmpty() }
     }
 
     private fun clean(raw: String?): String? =
@@ -94,21 +89,38 @@ class NavNotificationParser(
         }
     }
 
-    private fun extractTarget(title: String?, text: String?): String? {
-        val candidates = listOfNotNull(text, title)
-        for (candidate in candidates) {
-            // Skip strings that are purely a distance (e.g. "250 m" in Google Maps title).
-            if (PURE_DISTANCE_REGEX.matches(candidate.trim())) continue
-            var stripped = candidate
-                .replace(DISTANCE_PREFIX_REGEX, "")
-                .replace(LEADING_PHRASE_REGEX, "")
-                .trim(' ', '-', '·', ':')
-            if (stripped.isNotEmpty()) {
-                return stripped
-            }
+    /** Reduces a Google Maps instruction to the road/street name, or null when there is none. */
+    private fun extractRoad(title: String?, text: String?): String? {
+        for (candidate in listOfNotNull(text, title)) {
+            if (PURE_DISTANCE_REGEX.matches(candidate)) continue
+            val stripped = DISTANCE_PREFIX_REGEX.replace(candidate, "")
+                .let { LEADING_PHRASE_REGEX.replace(it, "") }
+                .trim(' ', '-', '·', ':', ',')
+            if (stripped.isEmpty() || INSTRUCTION_ONLY.matches(stripped.lowercase())) continue
+            return abbreviateRoad(stripped)
         }
         return null
     }
+
+    /**
+     * Keeps the arrow and distance intact, then adds only whole road words that fit in the
+     * 30-byte caller slot. A long road name is truncated at a word boundary rather than mid-word.
+     */
+    private fun fitCue(priority: List<String>, road: String?): String {
+        val prefix = priority.map(::sanitize).filter { it.isNotEmpty() }.joinToString(" ")
+        if (road.isNullOrEmpty()) return prefix
+        var result = prefix
+        for (word in sanitize(road).split(WHITESPACE)) {
+            if (word.isEmpty()) continue
+            val candidate = if (result.isEmpty()) word else "$result $word"
+            // wireBytes() truncates, so measure the raw sanitized string instead.
+            if (candidate.toByteArray(Charsets.UTF_8).size > NavText.MAX_BYTES) break
+            result = candidate
+        }
+        return NavText.wireText(result)
+    }
+
+    private fun sanitize(raw: String): String = NavText.sanitize(raw)
 
     private fun abbreviateRoad(raw: String): String {
         var out = raw
@@ -142,7 +154,7 @@ class NavNotificationParser(
             RegexOption.IGNORE_CASE,
         )
         private val LEADING_PHRASE_REGEX = Regex(
-            """^(?:make\s+a\s+u-?turn|turn\s+(?:sharp\s+|slight\s+)?(?:left|right)|(?:keep|bear|slight)\s+(?:left|right)|continue\s+straight|continue|head\s+(?:north|south|east|west|northeast|northwest|southeast|southwest)|take\s+(?:the\s+)?exit(?:\s+toward)?|at\s+the\s+roundabout(?:\s+take)?)\s*(?:onto|on|toward|towards|to)?\s*""",
+            """^(?:make\s+a\s+u-?turn|turn\s+(?:sharp\s+|slight\s+)?(?:left|right)|(?:keep|bear|slight)\s+(?:left|right)|continue(?:\s+straight)?|head\s+(?:(?:north|south|east|west|northeast|northwest|southeast|southwest)|towards?|to)|take\s+(?:the\s+)?exit(?:\s+toward)?|at\s+the\s+roundabout(?:\s+take)?)\s*(?:to\s+stay\s+on|stay\s+on|onto|on|toward|towards|to)?\s*""",
             RegexOption.IGNORE_CASE,
         )
         private val NON_TURN_MARKERS = setOf(
@@ -150,6 +162,18 @@ class NavNotificationParser(
             "navigating",
             "gps",
             "searching for gps",
+        )
+        private val TRANSIENT_MARKERS = listOf(
+            "starting navigation",
+            "rerout",
+            "recalculating",
+            "calculating route",
+            "searching for gps",
+            "gps signal lost",
+        )
+        private val INSTRUCTION_ONLY = Regex(
+            """(?:turn\s+)?(?:sharp\s+|slight\s+)?(?:left|right|straight)|stay\s+on|head(?:\s+\w+)?|continue(?:\s+straight)?|(?:keep|bear)\s+(?:left|right)|arriv\w*|destination""",
+            RegexOption.IGNORE_CASE,
         )
         private val ROAD_ABBREVIATIONS: List<Pair<Regex, String>> = listOf(
             Regex("""\bRoad\b""", RegexOption.IGNORE_CASE) to "Rd",
@@ -162,8 +186,6 @@ class NavNotificationParser(
             Regex("""\bLane\b""", RegexOption.IGNORE_CASE) to "Ln",
             Regex("""\bCircle\b""", RegexOption.IGNORE_CASE) to "Cir",
             Regex("""\bSquare\b""", RegexOption.IGNORE_CASE) to "Sq",
-            Regex("""\bTowards\b""", RegexOption.IGNORE_CASE) to "to",
-            Regex("""\bToward\b""", RegexOption.IGNORE_CASE) to "to",
         )
     }
 }

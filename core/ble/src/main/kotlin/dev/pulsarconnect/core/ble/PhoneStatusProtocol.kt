@@ -87,26 +87,20 @@ object PhoneStatusProtocol {
     )
 
     /**
-     * GENERAL frame carrying an experimental turn-by-turn navigation cue in the 30-byte caller-text
-     * slot. Only [CallState.INCOMING_CALL] and [CallState.ACTIVE_CALL] are valid because only those
-     * call states carry text on the wire.
+     * GENERAL frame carrying a navigation cue in the 30-byte caller-text slot. The wire call state
+     * is fixed to [CallState.INCOMING_CALL]: it is the only mode live-verified to display text on
+     * the N150, and it never flips the cluster into the active-call duration view.
      */
     fun encodeNavigation(
         status: PhoneStatus,
         heartbeat: Int,
-        callState: CallState,
         navText: String,
-    ): ByteArray {
-        require(callState == CallState.INCOMING_CALL || callState == CallState.ACTIVE_CALL) {
-            "Navigation text requires INCOMING_CALL or ACTIVE_CALL"
-        }
-        return encodeInternal(
-            status = status,
-            heartbeat = heartbeat,
-            callState = callState,
-            textBytes = NavText.wireBytes(navText),
-        )
-    }
+    ): ByteArray = encodeInternal(
+        status = status,
+        heartbeat = heartbeat,
+        callState = CallState.INCOMING_CALL,
+        textBytes = NavText.wireBytes(navText),
+    )
 
     private fun encodeInternal(
         status: PhoneStatus,

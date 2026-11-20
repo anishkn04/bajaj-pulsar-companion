@@ -55,10 +55,7 @@ class BikeLinkController(
         navEvents = navEvents,
         navOptions = {
             val settings = preferences.settings.value
-            NavMirrorOptions(
-                enabled = settings.mirrorNavigation,
-                wireMode = settings.navWireMode,
-            )
+            NavMirrorOptions(enabled = settings.mirrorNavigation)
         },
         onNavPreview = { preview ->
             _state.update { it.copy(navMirrorPreview = preview) }
@@ -226,11 +223,6 @@ class BikeLinkController(
         if (!enabled) {
             _state.update { it.copy(navMirrorPreview = null) }
         }
-    }
-
-    /** Switch between ACTIVE_CALL and INCOMING_CALL wire modes for live cluster testing. */
-    fun setNavWireMode(mode: NavWireMode) {
-        preferences.setNavWireMode(mode)
     }
 
     fun select(device: DiscoveredDevice) {
@@ -460,9 +452,6 @@ class BikeLinkController(
         }
         if (previous.mirrorNavigation != current.mirrorNavigation) {
             record(if (current.mirrorNavigation) "Navigation mirroring on" else "Navigation mirroring off")
-        }
-        if (previous.navWireMode != current.navWireMode) {
-            record("Navigation wire mode: ${current.navWireMode.name}")
         }
         if (previous.armedVin != current.armedVin) {
             record(if (current.armedVin != null) "Bike armed for background link" else "Bike unarmed")

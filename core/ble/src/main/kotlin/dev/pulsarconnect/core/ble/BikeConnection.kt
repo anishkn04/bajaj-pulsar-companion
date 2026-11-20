@@ -174,7 +174,8 @@ class BikeConnection(
     /**
      * Sends the GENERAL phone-status frame to the recovered writable endpoint of the current
      * connection. [callState] and [callerName] are only meaningful while an incoming call is
-     * ringing or active; [CallerName] guarantees a phone number is never written.
+     * ringing or active; [CallerName] guarantees a phone number is never written. [navText] is
+     * accepted only with [CallState.INCOMING_CALL] and always uses the incoming-call text slot.
      * Unsupported/disconnected sessions return false; write failures and cancellation propagate.
      */
     suspend fun sendPhoneStatus(
@@ -198,10 +199,8 @@ class BikeConnection(
         if (mtu < PhoneStatusProtocol.REQUIRED_MTU) {
             throw BleException(BleFailure.MtuTooSmall(PhoneStatusProtocol.REQUIRED_MTU, mtu))
         }
-        val bytes = if (navText != null &&
-            (callState == CallState.INCOMING_CALL || callState == CallState.ACTIVE_CALL)
-        ) {
-            PhoneStatusProtocol.encodeNavigation(status, heartbeat, callState, navText)
+        val bytes = if (navText != null && callState == CallState.INCOMING_CALL) {
+            PhoneStatusProtocol.encodeNavigation(status, heartbeat, navText)
         } else {
             PhoneStatusProtocol.encode(status, heartbeat, callState, callerName)
         }

@@ -157,7 +157,7 @@ class PhoneStatusSender(
                             activeNav != null -> connection.sendPhoneStatus(
                                 status = current,
                                 heartbeat = heartbeat,
-                                callState = navOpts.wireMode.callState,
+                                callState = CallState.INCOMING_CALL,
                                 navText = activeNav,
                             )
                             else -> connection.sendPhoneStatus(

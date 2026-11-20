@@ -73,6 +73,14 @@ confirmed on a live bike**: the cluster showed the incoming caller's display nam
 while ringing and the missed-call icon after an unanswered call. See
 [the BLE notes](docs/recon/BLE.md).
 
+Navigation mirroring is a third **opt-in, off by default** feature, enabled from Settings once
+notification access is granted. It reads ongoing Google Maps or Organic Maps turn notifications
+and writes compact `arrow distance road` cues into the same incoming-call text slot of the
+periodic phone-status frame. It never opens a call, never uses `ACTIVE_CALL`, and a real call
+always takes priority. Native TBT frames were ignored by the N150 and ALERT frames showed only
+an icon, so neither is used. The Bike link screen shows a read-only live cue preview with its
+30-byte size.
+
 ## Background service alerts
 
 Open **Service reminders → Enable alerts** to opt in. Android 13 and newer request notification permission only after you tap the button. If permission or the Service reminders channel is blocked, the screen shows delivery as blocked and offers Android notification settings. You can still view and manage reminders without allowing alerts.
@@ -154,7 +162,8 @@ This does not establish why the official app exhibits the reported login problem
 ## Still planned
 
 - **Bluetooth protocol decoding:** live cluster telemetry and automatic trip capture. Blocked on a targeted HCI snoop capture with the bike switched on; see [the BLE capture guide](docs/recon/BLE.md). No protocol is invented here.
-- Cloud trip sync, export/restore and navigation integration.
+- Cloud trip sync and export/restore. Navigation mirroring is implemented as the approved
+  incoming-call text slot exception; see [the BLE notes](docs/recon/BLE.md).
 - On-device testing with the bike and a connected Android phone, including a smoke test of background mirroring and boot resume on real hardware.
 
 ## Contributing

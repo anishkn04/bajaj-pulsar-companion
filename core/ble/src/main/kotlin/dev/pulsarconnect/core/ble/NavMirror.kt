@@ -2,18 +2,6 @@ package dev.pulsarconnect.core.ble
 
 import java.io.ByteArrayOutputStream
 
-/**
- * Call-state wire mode used when repurposing the 30-byte caller-name field of a GENERAL frame
- * for experimental turn-by-turn navigation cues on clusters without native TBT support (e.g. N150).
- */
-enum class NavWireMode(val callState: CallState) {
-    /** Wire value 3 (`ACTIVE_CALL`), flipping bytes 3/4 (`[3]=1, [4]=0`). */
-    ACTIVE_CALL(CallState.ACTIVE_CALL),
-
-    /** Wire value 1 (`INCOMING_CALL`), live-verified to display text on the N150 cluster. */
-    INCOMING_CALL(CallState.INCOMING_CALL),
-}
-
 /** Navigation cue transitions emitted by an opted-in navigation notification parser. */
 sealed interface NavEvent {
     /** An active route cue formatted as compact ASCII (`<= 30` UTF-8 bytes). */
@@ -23,11 +11,14 @@ sealed interface NavEvent {
     data object Ended : NavEvent
 }
 
-/** Opt-in configuration governing experimental TBT mirroring over the caller-name slot. */
-data class NavMirrorOptions(
-    val enabled: Boolean = false,
-    val wireMode: NavWireMode = NavWireMode.ACTIVE_CALL,
-)
+/**
+ * Opt-in configuration governing navigation mirroring over the caller-name slot.
+ *
+ * The wire call state is deliberately fixed to [CallState.INCOMING_CALL]: it is the only mode
+ * live-verified to display cue text on the N150, and it never flips the cluster into a call-duration
+ * state. A real call always takes priority in the sender loop.
+ */
+data class NavMirrorOptions(val enabled: Boolean = false)
 
 /**
  * Formats and caps navigation strings for the 30-byte caller-text area (`bytes[21..50]`).

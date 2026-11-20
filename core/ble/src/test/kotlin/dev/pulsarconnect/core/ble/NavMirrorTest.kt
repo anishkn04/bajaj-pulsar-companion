@@ -23,18 +23,17 @@ class NavMirrorTest {
     }
 
     @Test
-    fun `encodeNavigation uses requested callState and skips CallerName phone filter`() {
+    fun `encodeNavigation always uses INCOMING_CALL and skips CallerName phone filter`() {
         val frame = PhoneStatusProtocol.encodeNavigation(
             status = PhoneStatus(batteryPercent = 85, signalLevel = 3),
             heartbeat = 7,
-            callState = CallState.ACTIVE_CALL,
             navText = "> 250m NH48",
         )
         assertEquals(PhoneStatusProtocol.FRAME_SIZE, frame.size)
-        // batteryLevel 4 (85%) shifted by 3 | ACTIVE_CALL (3) = 0x23
-        assertEquals(0x23.toByte(), frame[1])
-        assertEquals(1.toByte(), frame[3])
-        assertEquals(0.toByte(), frame[4])
+        // batteryLevel 4 (85%) shifted by 3 | INCOMING_CALL (1) = 0x21
+        assertEquals(0x21.toByte(), frame[1])
+        assertEquals(0.toByte(), frame[3])
+        assertEquals(1.toByte(), frame[4])
         assertEquals("> 250m NH48", decodeCallerSlot(frame))
     }
 
@@ -64,7 +63,6 @@ class NavMirrorTest {
         val callEvents = MutableSharedFlow<CallEvent>(extraBufferCapacity = 16)
         val navEvents = MutableSharedFlow<NavEvent>(extraBufferCapacity = 16)
         var navEnabled = true
-        var mode = NavWireMode.ACTIVE_CALL
 
         val sender = PhoneStatusSender(
             connection = connection,
@@ -73,7 +71,7 @@ class NavMirrorTest {
             callEvents = callEvents,
             callOptions = { CallMirrorOptions(callerName = true, missedCalls = true) },
             navEvents = navEvents,
-            navOptions = { NavMirrorOptions(enabled = navEnabled, wireMode = mode) },
+            navOptions = { NavMirrorOptions(enabled = navEnabled) },
             intervalMillis = 1_000,
         )
         try {
@@ -85,7 +83,9 @@ class NavMirrorTest {
             advanceTimeBy(1_000)
             runCurrent()
             val navFrame = fake.latestSession.writes.last().bytes
-            assertEquals(CallState.ACTIVE_CALL.wireValue, navFrame[1].toInt() and 0x07)
+            assertEquals(CallState.INCOMING_CALL.wireValue, navFrame[1].toInt() and 0x07)
+            assertEquals(0, navFrame[3].toInt())
+            assertEquals(1, navFrame[4].toInt())
             assertEquals("> 250m MG Rd", decodeCallerSlot(navFrame))
 
             // Real incoming call preempts nav cue immediately on the next tick.
@@ -97,8 +97,7 @@ class NavMirrorTest {
             assertEquals(CallState.INCOMING_CALL.wireValue, callFrame[1].toInt() and 0x07)
             assertEquals("Alice", decodeCallerSlot(callFrame))
 
-            // Ending the call restores active navigation cue, now tested with INCOMING_CALL mode.
-            mode = NavWireMode.INCOMING_CALL
+            // Ending the call restores the navigation cue in the same incoming-call slot.
             callEvents.emit(CallEvent.Ended)
             runCurrent()
             advanceTimeBy(1_000)

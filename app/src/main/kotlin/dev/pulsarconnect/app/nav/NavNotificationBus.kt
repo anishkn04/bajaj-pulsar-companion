@@ -8,10 +8,12 @@ import kotlinx.coroutines.flow.asSharedFlow
 
 /**
  * Process-local hand-off from [dev.pulsarconnect.app.calls.NotificationCallListenerService] to the
- * bike link. Zero replay and bounded buffer so stale cues are dropped when the link is down.
+ * bike link. The latest event is replayed so a route that started before the BLE writer subscribed
+ * (for example, while the bike was still attaching) is not lost. The buffer stays bounded.
  */
 class NavNotificationBus {
     private val mutable = MutableSharedFlow<NavEvent>(
+        replay = 1,
         extraBufferCapacity = 8,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )

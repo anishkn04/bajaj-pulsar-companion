@@ -4,6 +4,7 @@ import android.app.Notification
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import dev.pulsarconnect.app.PulsarConnectApplication
+import dev.pulsarconnect.app.nav.NavNotificationParser
 import dev.pulsarconnect.app.nav.NavNotificationSnapshot
 import dev.pulsarconnect.core.ble.NavEvent
 
@@ -17,7 +18,18 @@ import dev.pulsarconnect.core.ble.NavEvent
  */
 class NotificationCallListenerService : NotificationListenerService() {
 
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        // Navigation may already be in progress when access is granted or the app restarts.
+        // Android only delivers future updates to onNotificationPosted, so seed from active ones.
+        activeNotifications?.forEach(::processNotification)
+    }
+
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
+        processNotification(sbn)
+    }
+
+    private fun processNotification(sbn: StatusBarNotification?) {
         val notification = sbn?.notification ?: return
         val container = (application as PulsarConnectApplication).container
         val settings = container.bikeLinkPreferences.settings.value
@@ -46,11 +58,10 @@ class NotificationCallListenerService : NotificationListenerService() {
         }
 
         if (settings.mirrorNavigation && container.navNotificationParser.accepts(sbn.packageName)) {
-            val isOngoing = (notification.flags and Notification.FLAG_ONGOING_EVENT) != 0
             val snapshot = NavNotificationSnapshot(
                 packageName = sbn.packageName,
                 category = notification.category,
-                isOngoing = isOngoing,
+                isOngoing = isNavigationNotification(notification),
                 title = notification.extras
                     ?.getCharSequence(Notification.EXTRA_TITLE)
                     ?.toString(),
@@ -75,9 +86,21 @@ class NotificationCallListenerService : NotificationListenerService() {
         val settings = container.bikeLinkPreferences.settings.value
         if (!settings.mirrorNavigation) return
         if (!container.navNotificationParser.accepts(packageName)) return
-        val isOngoing = (notification.flags and Notification.FLAG_ONGOING_EVENT) != 0
-        if (isOngoing || notification.category == dev.pulsarconnect.app.nav.NavNotificationParser.CATEGORY_NAVIGATION) {
-            container.navNotificationBus.publish(NavEvent.Ended)
-        }
+        if (!isNavigationNotification(notification)) return
+
+        // A notification may be removed and immediately reposted during a route update. Only
+        // clear the cluster when no accepted navigation notification for this app remains.
+        val routeStillActive = activeNotifications?.any { other ->
+            other.key != sbn.key &&
+                container.navNotificationParser.accepts(other.packageName) &&
+                isNavigationNotification(other.notification)
+        } == true
+        if (routeStillActive) return
+
+        container.navNotificationBus.publish(NavEvent.Ended)
     }
+
+    private fun isNavigationNotification(notification: Notification): Boolean =
+        (notification.flags and Notification.FLAG_ONGOING_EVENT) != 0 ||
+            notification.category == NavNotificationParser.CATEGORY_NAVIGATION
 }

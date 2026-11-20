@@ -102,9 +102,10 @@ CONTROL map (zero-based offsets):
 | `[13]` | Launch media |
 
 Only verified frames may be transmitted. Caller name and missed-call frames are
-implemented, opt-in, and were confirmed on a live bike (see below). Alert and
-turn-by-turn frames are not implemented at all: the official Android app does not
-expose them as features.
+implemented, opt-in, and were confirmed on a live bike (see below). Native TBT and ALERT
+navigation frames are not implemented: on the N150 a TBT frame was ignored and an ALERT
+frame produced only an icon with no usable text. The approved navigation mirror instead
+reuses the live-verified incoming-call text slot described below.
 
 ## Call mirroring and privacy
 
@@ -238,6 +239,23 @@ still follow the native static layout:
 
 The app must never substitute a phone number for a missing name; unnamed callers
 get the generic `Incoming call` label.
+
+## Navigation mirroring via the caller-text slot
+
+Navigation mirroring is opt-in and off by default. When enabled with notification access,
+ongoing Google Maps or Organic Maps turn notifications are condensed into ASCII cues of at
+most 30 UTF-8 bytes and written into GENERAL's caller-name slot (byte 20 length, bytes 21-50
+text) of the normal once-per-second phone-status frame. The wire call state is fixed to
+`INCOMING_CALL`; it is the only mode live-verified to display cue text on the N150. The app
+never sets `ACTIVE_CALL` for a cue, never presents navigation as a call, and a real incoming
+or active call immediately takes priority. Ending navigation clears the cue on the next frame.
+
+Cues are ordered `ARROW DISTANCE ROAD`, for example `^ Sangam Tole Marg`, `> 90m` or
+`> 250m MG Rd`. The arrow encodes the maneuver, the number is the step distance, and the road
+name is appended only while whole words fit; total route distance, ETA and locations are not
+written or stored. Native turn-by-turn and ALERT transports were tested but rejected for this
+bike: TBT frames produced no visible cue and ALERT produced an icon without usable text. There
+is no rider-facing wire-mode selector and no ongoing-call switcher.
 
 Live speed/RPM/fuel/gear telemetry is still not established. The capture's ACTION
 characteristic (`0a10676e-6972-6565-6e69-676e4543544f`) returns 26-byte read
