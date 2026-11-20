@@ -43,9 +43,13 @@ class NavNotificationParser(
         val target = extractTarget(title, text)
 
         val parts = buildList {
-            if (arrow != null) add(arrow)
-            if (distance != null) add(distance)
-            if (!target.isNullOrEmpty()) add(abbreviateRoad(target))
+            if (arrow != null) {
+                add(arrow)
+                if (distance != null) add(distance)
+            } else {
+                if (distance != null) add(distance)
+                if (!target.isNullOrEmpty()) add(abbreviateRoad(target))
+            }
         }
         val rawCue = if (parts.isNotEmpty()) {
             parts.joinToString(" ")

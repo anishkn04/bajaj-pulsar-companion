@@ -21,7 +21,7 @@ class NavNotificationParserTest {
                 subText = "12 min",
             ),
         )
-        assertEquals("> 250m Mahatma Gandhi Rd", cue)
+        assertEquals("> 250m", cue)
         assertTrue(cue!!.toByteArray(Charsets.UTF_8).size <= 30)
     }
 
@@ -37,8 +37,23 @@ class NavNotificationParserTest {
                 subText = null,
             ),
         )
-        assertEquals("\\< 1.2km Old Airport Hwy", cue)
+        assertEquals("\\< 1.2km", cue)
         assertTrue(cue!!.toByteArray(Charsets.UTF_8).size <= 30)
+    }
+
+    @Test
+    fun `keeps road name when notification has no recognizable maneuver`() {
+        val cue = parser.parse(
+            NavNotificationSnapshot(
+                packageName = "com.google.android.apps.maps",
+                category = "navigation",
+                isOngoing = true,
+                title = "100 m",
+                text = "Maitighar Road",
+                subText = null,
+            ),
+        )
+        assertEquals("100m Maitighar Rd", cue)
     }
 
     @Test

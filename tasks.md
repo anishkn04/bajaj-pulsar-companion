@@ -154,6 +154,11 @@ already riding. Make health and failures visible without opening the app.
   Blocked on decoding the bike's telemetry/odometer frames. Unblocks when a targeted HCI snoop
   capture with a known route and odometer readings is available and decoded. Do not guess
   frames or ship unverified decoding.
+- [~] **PC-26 — Prefer maneuver arrows in navigation mirror.**
+  When a supported navigation notification contains a recognizable maneuver, mirror the compact
+  arrow and distance (for example `> 100m`) instead of the destination road name. Preserve the
+  road-name fallback when no maneuver is recognized. Acceptance: Google Maps and Organic Maps
+  parser tests cover arrow-plus-distance output and fallback behavior.
 
 ## Recently completed
 
