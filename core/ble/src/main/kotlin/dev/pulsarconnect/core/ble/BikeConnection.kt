@@ -182,6 +182,7 @@ class BikeConnection(
         heartbeat: Int,
         callState: CallState = CallState.NO_CALL,
         callerName: String? = null,
+        navText: String? = null,
     ): Boolean {
         currentCoroutineContext().ensureActive()
         val version = generation
@@ -197,7 +198,13 @@ class BikeConnection(
         if (mtu < PhoneStatusProtocol.REQUIRED_MTU) {
             throw BleException(BleFailure.MtuTooSmall(PhoneStatusProtocol.REQUIRED_MTU, mtu))
         }
-        val bytes = PhoneStatusProtocol.encode(status, heartbeat, callState, callerName)
+        val bytes = if (navText != null &&
+            (callState == CallState.INCOMING_CALL || callState == CallState.ACTIVE_CALL)
+        ) {
+            PhoneStatusProtocol.encodeNavigation(status, heartbeat, callState, navText)
+        } else {
+            PhoneStatusProtocol.encode(status, heartbeat, callState, callerName)
+        }
         if (!isCurrent()) return false
         // Never re-read session for the write: a replacement must not receive this payload.
         activeSession.write(

@@ -11,8 +11,7 @@ import kotlinx.coroutines.flow.asStateFlow
  * [armedVin] is a lookup key only: it lets the background service find the selected bike
  * without decrypting the session while the phone is booting.
  *
- * Call mirroring is opt-in and off by default because the cluster would receive a contact's
- * display name. Missed calls carry no personal data but are still opt-in.
+ * Call and navigation mirroring are opt-in and off by default.
  */
 data class BikeLinkSettings(
     val mirroring: Boolean = true,
@@ -20,6 +19,8 @@ data class BikeLinkSettings(
     val startOnBoot: Boolean = true,
     val mirrorCallerName: Boolean = false,
     val mirrorMissedCalls: Boolean = false,
+    val mirrorNavigation: Boolean = false,
+    val navWireMode: NavWireMode = NavWireMode.ACTIVE_CALL,
     val armedVin: String? = null,
 ) {
     /** Mirroring only survives leaving the app when background mode is also on. */
@@ -30,21 +31,20 @@ data class BikeLinkSettings(
 
     /** True while at least one call feature is wanted. */
     val mirrorsAnyCall: Boolean get() = mirrorCallerName || mirrorMissedCalls
+
+    /** True while any NotificationListenerService-backed feature is wanted. */
+    val mirrorsAnyNotification: Boolean get() = mirrorsAnyCall || mirrorNavigation
 }
 
 interface BikeLinkPreferences {
     val settings: StateFlow<BikeLinkSettings>
-
     fun setMirroring(enabled: Boolean)
-
     fun setKeepInBackground(enabled: Boolean)
-
     fun setStartOnBoot(enabled: Boolean)
-
     fun setMirrorCallerName(enabled: Boolean)
-
     fun setMirrorMissedCalls(enabled: Boolean)
-
+    fun setMirrorNavigation(enabled: Boolean)
+    fun setNavWireMode(mode: NavWireMode)
     fun setArmedVin(vin: String?)
 }
 
@@ -73,6 +73,14 @@ class InMemoryBikeLinkPreferences(
 
     override fun setMirrorMissedCalls(enabled: Boolean) {
         mutable.value = mutable.value.copy(mirrorMissedCalls = enabled)
+    }
+
+    override fun setMirrorNavigation(enabled: Boolean) {
+        mutable.value = mutable.value.copy(mirrorNavigation = enabled)
+    }
+
+    override fun setNavWireMode(mode: NavWireMode) {
+        mutable.value = mutable.value.copy(navWireMode = mode)
     }
 
     override fun setArmedVin(vin: String?) {
