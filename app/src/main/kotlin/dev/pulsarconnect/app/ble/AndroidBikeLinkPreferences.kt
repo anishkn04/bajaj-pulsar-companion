@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.SharedPreferences
 import dev.pulsarconnect.core.ble.BikeLinkPreferences
 import dev.pulsarconnect.core.ble.BikeLinkSettings
-import dev.pulsarconnect.core.ble.NavWireMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
@@ -45,9 +44,6 @@ class AndroidBikeLinkPreferences(context: Context) : BikeLinkPreferences {
         mirrorCallerName = preferences.getBoolean(KEY_CALLER_NAME, false),
         mirrorMissedCalls = preferences.getBoolean(KEY_MISSED_CALLS, false),
         mirrorNavigation = preferences.getBoolean(KEY_NAVIGATION, false),
-        navWireMode = preferences.getString(KEY_NAV_WIRE_MODE, null)
-            ?.let { runCatching { NavWireMode.valueOf(it) }.getOrNull() }
-            ?: NavWireMode.ACTIVE_CALL,
         armedVin = preferences.getString(KEY_ARMED_VIN, null),
     )
 
@@ -59,7 +55,6 @@ class AndroidBikeLinkPreferences(context: Context) : BikeLinkPreferences {
             .putBoolean(KEY_CALLER_NAME, next.mirrorCallerName)
             .putBoolean(KEY_MISSED_CALLS, next.mirrorMissedCalls)
             .putBoolean(KEY_NAVIGATION, next.mirrorNavigation)
-            .putString(KEY_NAV_WIRE_MODE, next.navWireMode.name)
             .putString(KEY_ARMED_VIN, next.armedVin)
             .apply()
         settingsFlow.value = next
@@ -89,10 +84,6 @@ class AndroidBikeLinkPreferences(context: Context) : BikeLinkPreferences {
         apply(settingsFlow.value.copy(mirrorNavigation = enabled))
     }
 
-    override fun setNavWireMode(mode: NavWireMode) {
-        apply(settingsFlow.value.copy(navWireMode = mode))
-    }
-
     override fun setArmedVin(vin: String?) {
         apply(settingsFlow.value.copy(armedVin = vin))
     }
@@ -106,7 +97,6 @@ class AndroidBikeLinkPreferences(context: Context) : BikeLinkPreferences {
         private const val KEY_CALLER_NAME = "mirror_caller_name"
         private const val KEY_MISSED_CALLS = "mirror_missed_calls"
         private const val KEY_NAVIGATION = "mirror_navigation"
-        private const val KEY_NAV_WIRE_MODE = "nav_wire_mode"
         private const val KEY_ARMED_VIN = "armed_vin"
     }
 }

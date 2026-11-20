@@ -1,12 +1,14 @@
 package dev.pulsarconnect.app.nav
 
-import dev.pulsarconnect.core.ble.NavText
+import dev.pulsarconnect.core.ble.NavCue
+import dev.pulsarconnect.core.ble.NavManeuver
+import kotlin.math.roundToInt
 
 /**
  * The only fields inspected from an active navigation notification.
  *
- * Kept as a plain snapshot so parsing and ASCII condensation can be unit-tested on the JVM
- * without Android framework dependencies. Route history is never stored or logged.
+ * Kept as a plain snapshot so parsing can be unit-tested on the JVM without Android framework
+ * dependencies. Route history is never stored or logged.
  */
 data class NavNotificationSnapshot(
     val packageName: String,
@@ -18,8 +20,9 @@ data class NavNotificationSnapshot(
 )
 
 /**
- * Condenses ongoing turn-by-turn notifications from Google Maps and Organic Maps into compact
- * ASCII strings (`<= 30` UTF-8 bytes) suitable for the Pulsar N150's 30-byte caller-text BLE slot.
+ * Extracts the fields the cluster's navigation frame needs from Google Maps and Organic Maps
+ * ongoing notifications. Explicit direction words in the notification text win; otherwise the
+ * cue falls back to STRAIGHT. No notification content is persisted or logged.
  */
 class NavNotificationParser(
     packages: Set<String> = DEFAULT_PACKAGES,
@@ -28,86 +31,132 @@ class NavNotificationParser(
 
     fun accepts(packageName: String): Boolean = packageName.lowercase() in allowedPackages
 
-    fun parse(snapshot: NavNotificationSnapshot): String? {
+    fun parse(snapshot: NavNotificationSnapshot): NavCue? {
         if (!accepts(snapshot.packageName)) return null
         if (!snapshot.isOngoing && snapshot.category != CATEGORY_NAVIGATION) return null
 
-        val title = clean(snapshot.title)
-        val text = clean(snapshot.text)
-        val combined = listOfNotNull(title, text).joinToString(" ").trim()
-        if (combined.isEmpty()) return null
-        if (NON_TURN_MARKERS.any { combined.equals(it, ignoreCase = true) }) return null
+        val title = clean(snapshot.title).orEmpty()
+        val text = clean(snapshot.text).orEmpty()
+        val subText = clean(snapshot.subText).orEmpty()
+        val instruction = listOf(title, text).filter { it.isNotEmpty() }.joinToString(" ").trim()
+        if (instruction.isEmpty()) return null
+        if (NON_TURN_MARKERS.any { instruction.equals(it, ignoreCase = true) }) return null
 
-        val arrow = detectManeuverToken(combined)
-        val distance = extractDistance(title) ?: extractDistance(text)
-        val target = extractTarget(title, text)
-
-        val parts = buildList {
-            if (arrow != null) {
-                add(arrow)
-                if (distance != null) add(distance)
-            } else {
-                if (distance != null) add(distance)
-                if (!target.isNullOrEmpty()) add(abbreviateRoad(target))
-            }
-        }
-        val rawCue = if (parts.isNotEmpty()) {
-            parts.joinToString(" ")
-        } else {
-            abbreviateRoad(combined)
-        }
-        return NavText.wireText(rawCue).ifEmpty { null }
+        val maneuver = detectManeuver(instruction) ?: NavManeuver.STRAIGHT
+        return NavCue(
+            maneuver = maneuver,
+            distanceMeters = parseDistanceMeters(title) ?: parseDistanceMeters(text),
+            totalDistanceMeters = parseDistanceMeters(subText),
+            etaHour = parseEtaClock(subText)?.hour,
+            etaMinute = parseEtaClock(subText)?.minute,
+            etaPm = parseEtaClock(subText)?.pm ?: false,
+            roundaboutExit = parseRoundaboutExit(instruction),
+            text = abbreviateRoad(extractStreet(text, title)),
+        )
     }
 
     private fun clean(raw: String?): String? =
         raw?.replace(WHITESPACE, " ")?.trim()?.takeIf { it.isNotEmpty() }
 
-    private fun extractDistance(raw: String?): String? {
-        val value = raw ?: return null
-        val match = DISTANCE_REGEX.find(value) ?: return null
-        val number = match.groupValues[1]
-        val unit = match.groupValues[2].lowercase()
-        val compactUnit = when (unit) {
-            "meters", "meter", "m" -> "m"
-            "kilometers", "kilometer", "km" -> "km"
-            "feet", "foot", "ft" -> "ft"
-            "yards", "yard", "yd" -> "yd"
-            "miles", "mile", "mi" -> "mi"
-            else -> unit
+    private fun parseDistanceMeters(raw: String?): Int? {
+        val match = raw?.let { DISTANCE_REGEX.find(it) } ?: return null
+        val value = match.groupValues[1].replace(',', '.').toDoubleOrNull() ?: return null
+        val metres = when (match.groupValues[2].lowercase()) {
+            "km", "kilometer", "kilometers" -> value * 1_000.0
+            "mi", "mile", "miles" -> value * 1_609.34
+            "ft", "foot", "feet" -> value * 0.3048
+            "yd", "yard", "yards" -> value * 0.9144
+            else -> value
         }
-        return "$number$compactUnit"
+        return metres.roundToInt().coerceAtLeast(0)
     }
 
-    private fun detectManeuverToken(text: String): String? {
-        val lower = text.lowercase()
+    private data class Eta(val hour: Int, val minute: Int, val pm: Boolean)
+
+    private fun parseEtaClock(raw: String): Eta? {
+        val match = CLOCK_REGEX.find(raw) ?: return null
+        var hour = match.groupValues[1].toIntOrNull() ?: return null
+        val minute = match.groupValues[2].toIntOrNull()?.takeIf { it in 0..59 } ?: return null
+        val marker = match.groupValues[3].lowercase()
+        val pm = when {
+            marker == "pm" -> true
+            marker == "am" -> false
+            hour > 12 -> {
+                hour -= 12
+                true
+            }
+            hour == 0 -> {
+                hour = 12
+                false
+            }
+            else -> false
+        }
+        return Eta(hour.coerceIn(1..12), minute, pm)
+    }
+
+    private fun detectManeuver(instruction: String): NavManeuver? {
+        val lower = instruction.lowercase()
+        if (containsAny(lower, "reached your destination", "you have reached", "you've reached",
+                "you have arrived", "arrived at your destination")
+        ) {
+            return NavManeuver.DESTINATION
+        }
+        val hasDirection = containsAny(
+            lower, "turn left", "turn right", "left onto", "right onto", "left on", "right on",
+            "keep left", "keep right", "slight", "sharp", "roundabout", "rotary", "traffic circle",
+            "fork", "merge", "u-turn", "u turn", "uturn", "take the", "exit", "continue",
+            "straight", "head ", "go ",
+        )
+        if (!hasDirection && lower.contains("arrive")) return NavManeuver.DESTINATION
         return when {
-            lower.contains("u-turn") || lower.contains("uturn") -> "U"
-            lower.contains("roundabout") || lower.contains("rotary") -> "@"
-            lower.contains("arrive") || lower.contains("destination") -> "*"
-            lower.contains("slight right") || lower.contains("keep right") || lower.contains("bear right") -> "/>"
-            lower.contains("slight left") || lower.contains("keep left") || lower.contains("bear left") -> "\\<"
-            lower.contains("sharp right") || lower.contains("turn right") || lower.contains("right onto") || lower.contains("right") -> ">"
-            lower.contains("sharp left") || lower.contains("turn left") || lower.contains("left onto") || lower.contains("left") -> "<"
-            lower.contains("merge") || lower.contains("exit") -> ">>"
-            lower.contains("straight") || lower.contains("continue") || lower.contains("head ") -> "^"
+            containsAny(lower, "roundabout", "rotary", "traffic circle") ->
+                if (lower.contains("right")) NavManeuver.ROUNDABOUT_RIGHT else NavManeuver.ROUNDABOUT_LEFT
+            containsAny(lower, "u-turn", "u turn", "uturn") ->
+                if (lower.contains("right")) NavManeuver.U_TURN_RIGHT else NavManeuver.U_TURN_LEFT
+            lower.contains("sharp left") -> NavManeuver.SHARP_LEFT
+            lower.contains("sharp right") -> NavManeuver.SHARP_RIGHT
+            containsAny(lower, "slight left", "bear left") -> NavManeuver.SLIGHT_LEFT
+            containsAny(lower, "slight right", "bear right") -> NavManeuver.SLIGHT_RIGHT
+            lower.contains("keep left") -> NavManeuver.KEEP_LEFT
+            lower.contains("keep right") -> NavManeuver.KEEP_RIGHT
+            lower.contains("merge") -> NavManeuver.MERGE
+            lower.contains("fork left") -> NavManeuver.FORK_LEFT
+            lower.contains("fork right") -> NavManeuver.FORK_RIGHT
+            containsAny(lower, "take the", "exit") -> when {
+                lower.contains("left") -> NavManeuver.FORK_LEFT
+                lower.contains("right") -> NavManeuver.FORK_RIGHT
+                else -> null
+            }
+            containsAny(lower, "turn left", "left onto", "left on") -> NavManeuver.TURN_LEFT
+            containsAny(lower, "turn right", "right onto", "right on") -> NavManeuver.TURN_RIGHT
+            containsAny(lower, "continue", "straight", "head ", "go ") -> NavManeuver.STRAIGHT
             else -> null
         }
     }
 
-    private fun extractTarget(title: String?, text: String?): String? {
-        val candidates = listOfNotNull(text, title)
-        for (candidate in candidates) {
-            // Skip strings that are purely a distance (e.g. "250 m" in Google Maps title).
-            if (PURE_DISTANCE_REGEX.matches(candidate.trim())) continue
-            var stripped = candidate
-                .replace(DISTANCE_PREFIX_REGEX, "")
-                .replace(LEADING_PHRASE_REGEX, "")
-                .trim(' ', '-', '·', ':')
-            if (stripped.isNotEmpty()) {
-                return stripped
-            }
+    private fun parseRoundaboutExit(instruction: String): Int {
+        val lower = instruction.lowercase()
+        REGULAR_EXIT_REGEX.find(lower)?.groupValues?.get(1)?.toIntOrNull()?.let { return it }
+        EXIT_NUMBER_REGEX.find(lower)?.groupValues?.get(1)?.toIntOrNull()?.let { return it }
+        return 0
+    }
+
+    /** Reduces Maps' instruction text to just the road name. */
+    private fun extractStreet(text: String, title: String): String {
+        var street = text.ifEmpty { title }
+        val lower = street.lowercase()
+        val towards = lower.indexOf(" towards ")
+        val onto = lower.indexOf(" onto ")
+        when {
+            towards >= 0 -> street = street.substring(towards + 9)
+            onto >= 0 -> street = street.substring(onto + 6)
+            lower.startsWith("towards ") -> street = street.substring(8)
+            lower.startsWith("onto ") -> street = street.substring(5)
         }
-        return null
+        street = street.trim()
+        val trimmed = street.lowercase()
+        if (INSTRUCTION_PREFIXES.any { trimmed.startsWith(it) }) return ""
+        return street
     }
 
     private fun abbreviateRoad(raw: String): String {
@@ -117,6 +166,9 @@ class NavNotificationParser(
         }
         return out.replace(WHITESPACE, " ").trim()
     }
+
+    private fun containsAny(value: String, vararg needles: String): Boolean =
+        needles.any { value.contains(it) }
 
     companion object {
         const val CATEGORY_NAVIGATION: String = "navigation"
@@ -133,23 +185,18 @@ class NavNotificationParser(
             """\b(\d+(?:[.,]\d+)?)\s*(km|kilometers?|m|meters?|mi|miles?|ft|feet|foot|yd|yards?)\b""",
             RegexOption.IGNORE_CASE,
         )
-        private val PURE_DISTANCE_REGEX = Regex(
-            """^\s*(?:in\s+)?\d+(?:[.,]\d+)?\s*(?:km|kilometers?|m|meters?|mi|miles?|ft|feet|foot|yd|yards?)\s*$""",
-            RegexOption.IGNORE_CASE,
-        )
-        private val DISTANCE_PREFIX_REGEX = Regex(
-            """^(?:in\s+)?\d+(?:[.,]\d+)?\s*(?:km|kilometers?|m|meters?|mi|miles?|ft|feet|foot|yd|yards?)\s*(?:[-·,]\s*)?""",
-            RegexOption.IGNORE_CASE,
-        )
-        private val LEADING_PHRASE_REGEX = Regex(
-            """^(?:make\s+a\s+u-?turn|turn\s+(?:sharp\s+|slight\s+)?(?:left|right)|(?:keep|bear|slight)\s+(?:left|right)|continue\s+straight|continue|head\s+(?:north|south|east|west|northeast|northwest|southeast|southwest)|take\s+(?:the\s+)?exit(?:\s+toward)?|at\s+the\s+roundabout(?:\s+take)?)\s*(?:onto|on|toward|towards|to)?\s*""",
-            RegexOption.IGNORE_CASE,
-        )
+        private val CLOCK_REGEX = Regex("""(\d{1,2}):(\d{2})(?:\s*([ap]m))?""", RegexOption.IGNORE_CASE)
+        private val REGULAR_EXIT_REGEX = Regex("""(\d+)(?:st|nd|rd|th)\s+exit""", RegexOption.IGNORE_CASE)
+        private val EXIT_NUMBER_REGEX = Regex("""exit\s+(\d+)""", RegexOption.IGNORE_CASE)
         private val NON_TURN_MARKERS = setOf(
             "navigation",
             "navigating",
             "gps",
             "searching for gps",
+        )
+        private val INSTRUCTION_PREFIXES = listOf(
+            "turn ", "keep ", "merge", "continue", "head ", "take ", "exit", "slight", "sharp",
+            "u-turn", "u turn", "roundabout", "arrive", "start", "rerout",
         )
         private val ROAD_ABBREVIATIONS: List<Pair<Regex, String>> = listOf(
             Regex("""\bRoad\b""", RegexOption.IGNORE_CASE) to "Rd",

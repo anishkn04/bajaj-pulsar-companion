@@ -20,7 +20,6 @@ data class BikeLinkState(
     val callerMirroringAvailable: Boolean = false,
     val missedCallMirroringAvailable: Boolean = false,
     val passiveWait: PassiveWaitState = PassiveWaitState.OFF,
-    val navMirrorPreview: String? = null,
 )
 
 /**
@@ -53,16 +52,7 @@ class BikeLinkController(
             )
         },
         navEvents = navEvents,
-        navOptions = {
-            val settings = preferences.settings.value
-            NavMirrorOptions(
-                enabled = settings.mirrorNavigation,
-                wireMode = settings.navWireMode,
-            )
-        },
-        onNavPreview = { preview ->
-            _state.update { it.copy(navMirrorPreview = preview) }
-        },
+        navOptions = { NavMirrorOptions(enabled = preferences.settings.value.mirrorNavigation) },
         onStopped = ::onMirroringStopped,
         onSent = ::onMirroringSent,
     )
@@ -220,17 +210,9 @@ class BikeLinkController(
         preferences.setMirrorMissedCalls(enabled)
     }
 
-    /** Opt-in experimental turn-by-turn navigation cue via the 30-byte caller-text slot. */
+    /** Opt-in turn-by-turn navigation mirroring using the cluster's negotiated transport. */
     fun setMirrorNavigation(enabled: Boolean) {
         preferences.setMirrorNavigation(enabled)
-        if (!enabled) {
-            _state.update { it.copy(navMirrorPreview = null) }
-        }
-    }
-
-    /** Switch between ACTIVE_CALL and INCOMING_CALL wire modes for live cluster testing. */
-    fun setNavWireMode(mode: NavWireMode) {
-        preferences.setNavWireMode(mode)
     }
 
     fun select(device: DiscoveredDevice) {
@@ -460,9 +442,6 @@ class BikeLinkController(
         }
         if (previous.mirrorNavigation != current.mirrorNavigation) {
             record(if (current.mirrorNavigation) "Navigation mirroring on" else "Navigation mirroring off")
-        }
-        if (previous.navWireMode != current.navWireMode) {
-            record("Navigation wire mode: ${current.navWireMode.name}")
         }
         if (previous.armedVin != current.armedVin) {
             record(if (current.armedVin != null) "Bike armed for background link" else "Bike unarmed")

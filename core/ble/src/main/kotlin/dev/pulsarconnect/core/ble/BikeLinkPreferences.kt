@@ -20,7 +20,6 @@ data class BikeLinkSettings(
     val mirrorCallerName: Boolean = false,
     val mirrorMissedCalls: Boolean = false,
     val mirrorNavigation: Boolean = false,
-    val navWireMode: NavWireMode = NavWireMode.ACTIVE_CALL,
     val armedVin: String? = null,
 ) {
     /** Mirroring only survives leaving the app when background mode is also on. */
@@ -44,7 +43,6 @@ interface BikeLinkPreferences {
     fun setMirrorCallerName(enabled: Boolean)
     fun setMirrorMissedCalls(enabled: Boolean)
     fun setMirrorNavigation(enabled: Boolean)
-    fun setNavWireMode(mode: NavWireMode)
     fun setArmedVin(vin: String?)
 }
 
@@ -77,10 +75,6 @@ class InMemoryBikeLinkPreferences(
 
     override fun setMirrorNavigation(enabled: Boolean) {
         mutable.value = mutable.value.copy(mirrorNavigation = enabled)
-    }
-
-    override fun setNavWireMode(mode: NavWireMode) {
-        mutable.value = mutable.value.copy(navWireMode = mode)
     }
 
     override fun setArmedVin(vin: String?) {

@@ -38,7 +38,10 @@ natives into the APK.
 
 - **Kotlin only.** Never add Java source to the app or core modules.
 - **Google Material icons only.** Do not add custom in-app vector icon drawables.
-- **No alerts or turn-by-turn features.** Navigation integration is out of scope.
+- **No alerts or turn-by-turn features, except the explicitly approved, evidence-gated navigation
+  mirroring described below.** That one exception uses the cluster's real TBT protocol, never fake
+  call states; ALERT and incoming-call text are capability-gated fallbacks only. Do not add any
+  other alert or navigation behavior without a new rider decision.
 - **No vehicle-specific constants.** No hard-coded VIN, model quirks, or dealer access codes.
 - **Never commit secrets or personal data:** credentials, access codes, tokens, VINs, Bluetooth
   MAC addresses, notification captures, bugreports, APKs, AABs, keystores, or passwords.
@@ -52,6 +55,10 @@ natives into the APK.
   disarms them.
 - Caller-name and missed-call mirroring stay opt-in and **off by default**. Unknown callers show
   `"Incoming call"`. Never send or store a phone number.
+- Navigation mirroring is opt-in and **off by default**. It uses TBT → ALERT → incoming-call text
+  in that order, with no rider-facing wire-mode selector, and never sets `ACTIVE_CALL` for a cue.
+  A real call always wins. The setting lives in Settings and is available before the bike connects;
+  notification access is the only enablement gate.
 - Background reconnect must stay **low battery**: passive GATT (`autoConnect = true`) plus a
   watchdog, not periodic scanning or tight polling.
 - Do not push a release tag or create a release unless the rider explicitly asks.

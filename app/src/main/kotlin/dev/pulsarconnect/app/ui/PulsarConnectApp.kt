@@ -259,8 +259,6 @@ private fun SignedInScreen(
                         onPhoneStatusChange = bleViewModel::setMirroring,
                         onCallerNameChange = bleViewModel::setMirrorCallerName,
                         onMissedCallChange = bleViewModel::setMirrorMissedCalls,
-                        onNavigationMirrorChange = bleViewModel::setMirrorNavigation,
-                        onNavWireModeChange = bleViewModel::setNavWireMode,
                         onOpenNotificationSettings = {
                             openNotificationAccessSettings(context)
                         },
@@ -278,6 +276,10 @@ private fun SignedInScreen(
                         onMirroringChange = bleViewModel::setMirroring,
                         onBackgroundChange = bleViewModel::setKeepInBackground,
                         onBootChange = bleViewModel::setStartOnBoot,
+                        onNavigationMirrorChange = bleViewModel::setMirrorNavigation,
+                        onOpenNotificationAccessSettings = {
+                            openNotificationAccessSettings(context)
+                        },
                         onStopMirroring = { bleViewModel.disconnect(); navDestination = NavDestination.HOME },
                         onExportBackup = viewModel::exportBackup,
                         onRestoreBackup = viewModel::restoreBackup,
