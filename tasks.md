@@ -137,13 +137,14 @@ already riding. Make health and failures visible without opening the app.
 
 ## P4 — Bigger bets
 
-- [ ] **PC-22 — Fuel economy from manual fill-ups.**
+- [x] **PC-22 — Fuel economy from manual fill-ups.** (`483d0e8`)
   Record liters and odometer at fill-up; compute consumption between fill-ups. No protocol
   decoding required. Acceptance: handles partial fill-ups and rejects non-increasing odometers.
 
-- [ ] **PC-23 — Quick Settings tile / widget.**
+- [x] **PC-23 — Quick Settings tile.** (`f801549`)
   Show link state and offer connect/disconnect. Acceptance: reflects the same state as the app
-  and does not start the service when mirroring is disarmed.
+  and does not start the service when mirroring is disarmed. A home-screen widget remains a
+  separate follow-up.
 
 - [ ] **PC-24 — Planned, not scheduled: cloud sync.**
   Conflicts with the offline-first, no-analytics stance and needs a backend. Do not start

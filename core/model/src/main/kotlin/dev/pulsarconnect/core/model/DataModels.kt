@@ -35,6 +35,20 @@ data class OdometerReading(
     val recordedAtMillis: Long,
 )
 
+/**
+ * Fuel added at a manual fill-up. [fullTank] marks the end of a full-to-full economy interval;
+ * partial fill-ups are still stored so their litres count toward the next interval.
+ */
+@Serializable
+data class FuelFillUp(
+    val id: Long? = null,
+    val vin: String,
+    val filledAtMillis: Long,
+    val odometerKm: Double,
+    val liters: Double,
+    val fullTank: Boolean,
+)
+
 @Serializable
 data class TelemetryPoint(
     val id: Long? = null,

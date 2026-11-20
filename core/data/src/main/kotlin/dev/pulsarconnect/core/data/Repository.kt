@@ -1,6 +1,7 @@
 package dev.pulsarconnect.core.data
 
 import dev.pulsarconnect.core.model.BikeProfile
+import dev.pulsarconnect.core.model.FuelFillUp
 import dev.pulsarconnect.core.model.OdometerReading
 import dev.pulsarconnect.core.model.ServiceReminder
 import dev.pulsarconnect.core.model.TelemetryPoint
@@ -89,6 +90,30 @@ interface BikeRepository {
     suspend fun upsertBike(profile: BikeProfile): BikeProfile
     suspend fun getBike(vin: String): BikeProfile?
     suspend fun updateLastSynced(vin: String, atMillis: Long)
+}
+
+interface FuelRepository {
+    /**
+     * Stores a manual fill-up. The odometer must be strictly higher than every fill-up already
+     * saved for this VIN, so a mistyped reading cannot corrupt the economy history.
+     */
+    suspend fun addFillUp(fillUp: FuelFillUp): FuelFillUp
+
+    /** Highest odometer first, then highest ID first. */
+    suspend fun getFillUps(vin: String): List<FuelFillUp>
+
+    /** Finds a fill-up by ID regardless of VIN, used to detect restore conflicts. */
+    suspend fun getFillUp(id: Long): FuelFillUp?
+
+    /** Deletes only the selected fill-up. Throws if it does not exist. */
+    suspend fun deleteFillUp(id: Long)
+
+    /**
+     * Re-inserts a fill-up with its original ID for backup restore. This does not apply the
+     * "newer than the latest fill-up" rule; the backup validates its whole ordered set first.
+     * Throws if the ID is already in use or the bike is missing.
+     */
+    suspend fun restoreFillUp(fillUp: FuelFillUp): FuelFillUp
 }
 
 interface OdometerRepository {
@@ -328,6 +353,47 @@ class InMemoryBikeRepository : BikeRepository {
 
     override suspend fun updateLastSynced(vin: String, atMillis: Long): Unit = mutex.withLock {
         bikes[vin]?.let { bikes[vin] = it.copy(lastSyncedAtMillis = atMillis) }
+    }
+}
+
+class InMemoryFuelRepository : FuelRepository {
+    private val fillUps = mutableMapOf<Long, FuelFillUp>()
+    private val mutex = Mutex()
+    private var nextId = 1L
+
+    override suspend fun addFillUp(fillUp: FuelFillUp): FuelFillUp = mutex.withLock {
+        requireValidFillUp(fillUp)
+        val latest = fillUps.values
+            .filter { it.vin == fillUp.vin }
+            .maxOfOrNull { it.odometerKm }
+        require(latest == null || fillUp.odometerKm > latest) {
+            "Fill-up odometer must be higher than the previous fill-up."
+        }
+        val withId = fillUp.copy(id = nextId)
+        nextId++
+        fillUps[withId.id!!] = withId
+        withId
+    }
+
+    override suspend fun getFillUps(vin: String): List<FuelFillUp> = fillUps.values
+        .filter { it.vin == vin }
+        .sortedWith(compareByDescending<FuelFillUp> { it.odometerKm }.thenByDescending { it.id })
+        .toList()
+
+    override suspend fun getFillUp(id: Long): FuelFillUp? = mutex.withLock { fillUps[id] }
+
+    override suspend fun deleteFillUp(id: Long): Unit = mutex.withLock {
+        requireNotNull(fillUps.remove(id)) { "Fill-up must exist before it can be deleted" }
+        Unit
+    }
+
+    override suspend fun restoreFillUp(fillUp: FuelFillUp): FuelFillUp = mutex.withLock {
+        requireValidFillUp(fillUp)
+        val id = requireNotNull(fillUp.id) { "Fill-up must have an ID" }
+        require(!fillUps.containsKey(id)) { "Fill-up ID is already in use" }
+        fillUps[id] = fillUp
+        nextId = maxOf(nextId, id + 1)
+        fillUp
     }
 }
 

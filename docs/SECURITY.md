@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | VIN, access code | app-private storage | AES-GCM key in the Android Keystore |
 | App token, user token | app-private storage | same key |
-| Bike profiles, trips, telemetry, reminders | native Android SQLite database | app-private storage; not separately encrypted |
+| Bike profiles, trips, telemetry, reminders, fuel fill-ups | native Android SQLite database | app-private storage; not separately encrypted |
 | Alert opt-in/pause state and delivered/completed reminder IDs | app-private preferences | no credentials, VINs, titles or locations |
 | App lock preference | app-private preferences | opt-in boolean only; no credentials or vehicle data |
 | Background scheduling | WorkManager's app-private database | generic work names; no credentials or vehicle data in work input |
@@ -41,8 +41,8 @@ locked screen offers a deliberate "Turn off app lock" escape hatch rather than
 locking the rider out of their own local records. Contributor redaction rules
 are a process safeguard, not an automatic disclosure-prevention mechanism.
 
-Signing out clears saved credentials/tokens, **not** bike profiles, trips or
-reminders. Records remain per VIN for the next sign-in. Clear Android app
+Signing out clears saved credentials/tokens, **not** bike profiles, trips,
+reminders or fuel fill-ups. Records remain per VIN for the next sign-in. Clear Android app
 storage or uninstall to remove them. There is no export/restore workflow yet;
 users should retain another copy of important service records.
 

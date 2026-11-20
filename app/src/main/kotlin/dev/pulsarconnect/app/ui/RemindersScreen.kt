@@ -134,7 +134,6 @@ internal fun RemindersScreen(
                     onValueChange = { odometer = it },
                     label = { Text("Due odometer (km, optional)") },
                     placeholder = { Text("5000.0") },
-                    supportingText = { Text("Use a decimal point for fractional kilometres.") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     enabled = enabled,
                     singleLine = true,
@@ -146,7 +145,6 @@ internal fun RemindersScreen(
                     onValueChange = { date = it },
                     label = { Text("Due date (optional)") },
                     placeholder = { Text("yyyy-MM-dd") },
-                    supportingText = { Text("ISO date, for example 2026-12-31. Uses this device’s time zone.") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
                     enabled = enabled,
                     singleLine = true,
@@ -158,7 +156,6 @@ internal fun RemindersScreen(
                     onValueChange = { repeatKm = it },
                     label = { Text("Repeat every (km, optional)") },
                     placeholder = { Text("3000.0") },
-                    supportingText = { Text("Needs a due odometer; the next occurrence is created after completion.") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     enabled = enabled,
                     singleLine = true,
@@ -170,19 +167,11 @@ internal fun RemindersScreen(
                     onValueChange = { repeatDays = it },
                     label = { Text("Repeat every (days, optional)") },
                     placeholder = { Text("180") },
-                    supportingText = { Text("Needs a due date; the next occurrence is created after completion.") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     enabled = enabled,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     shape = MaterialTheme.shapes.medium,
-                )
-                Text(
-                    "Set an odometer, a date, or both. When both are set, the reminder is due " +
-                        "whichever comes first. Odometer checks use your latest recorded reading. " +
-                        "Recurring reminders re-arm their next date or distance when marked done.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 PillButton(
                     label = "Add reminder",
@@ -357,16 +346,6 @@ private fun ReminderRecordCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Text(
-            when {
-                reminder.completed -> "Completed"
-                due -> "Due · based on date or recorded odometer"
-                reminder.dueOdometerKm != null && lastOdometer == null -> "Odometer status unknown"
-                else -> "Not due based on saved readings and date"
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = if (due) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
         if (reminder.dueOdometerKm != null || reminder.dueDateMillis != null || reminder.completedAtMillis != null) {
             PulsarDivider()
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {

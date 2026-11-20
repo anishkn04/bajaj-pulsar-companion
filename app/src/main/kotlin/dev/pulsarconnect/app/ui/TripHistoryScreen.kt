@@ -84,7 +84,6 @@ internal fun TripHistoryScreen(
             ScreenHeader(
                 eyebrow = "Ride log",
                 title = "Trips",
-                subtitle = "Enter the odometer from your bike.",
             )
         }
         item { LocalDataStatus(state, onClearError, onRetry) }
@@ -113,7 +112,6 @@ internal fun TripHistoryScreen(
                     onValueChange = { odometer = it },
                     label = { Text(if (active == null) "Start odometer (km)" else "End odometer (km)") },
                     placeholder = { Text("1234.5") },
-                    supportingText = { Text("Use a decimal point, for example 1234.5.") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
                     enabled = enabled,
@@ -158,8 +156,7 @@ internal fun TripHistoryScreen(
         if (completedTrips.isEmpty() && !state.localLoading && !state.localLoadFailed) {
             item {
                 EmptyState(
-                    if (filterActive) "No trips in this date range. Clear the filter to see all trips."
-                    else "No trips yet. Start a manual trip above to create your first record.",
+                    if (filterActive) "No trips in this date range." else "No trips yet.",
                 )
             }
         }
@@ -231,12 +228,6 @@ private fun TripDateFilterCard(
             text = "Filter by date",
             style = MaterialTheme.typography.titleLarge,
             color = MaterialTheme.colorScheme.onSurface,
-        )
-        Text(
-            text = "From and To are inclusive and use this device’s time zone. " +
-                "Leave either blank for an open range.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedTextField(
@@ -484,7 +475,6 @@ private fun TripOdometerDialog(
         title = { Text("Edit trip odometer") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Correct a mistyped reading. Distance and average speed are recalculated.")
                 OutlinedTextField(
                     value = start,
                     onValueChange = { start = it },

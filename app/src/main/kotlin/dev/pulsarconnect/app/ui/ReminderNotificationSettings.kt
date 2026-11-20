@@ -145,51 +145,26 @@ internal fun ReminderNotificationSettings(
             }
             StatusPill(text = pillText, tone = pillTone)
         }
-        Text(
-            when {
-                !enabled -> "Alerts: off (opt-in only)"
-                !status.canDeliver -> "Alerts: on · delivery blocked by Android"
-                else -> "Alerts: on · Android allows delivery"
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
-        Text(
-            "Signing out stops alerts, but keeps your opt-in preference on this phone.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        if (!status.permissionGranted) {
-            Text(
-                when {
-                    enabled -> "Notification permission is not granted. Your opt-in remains on, but delivery is blocked. " +
-                        "Allow notifications in Android settings to restore delivery, or disable alerts below."
-                    permissionDenied -> "Notification permission was not granted. Alerts remain off. " +
-                        "You can allow notifications in Android settings; we will not prompt again automatically."
-                    else -> "Notification permission is not granted. Tap Enable alerts to request it."
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
-            )
+        val blocker = when {
+            settingsUnavailable ->
+                "Could not open Android settings. Open Settings manually and find this app’s notification settings."
+            status.channelBlocked ->
+                "The Service reminders notification channel is blocked. Enable it in Android settings to receive alerts."
+            !status.appNotificationsEnabled ->
+                "Android is blocking app notifications. Allow notifications in Android settings to receive alerts."
+            !status.permissionGranted && enabled ->
+                "Notification permission is not granted. Your opt-in remains on, but delivery is blocked. " +
+                    "Allow notifications in Android settings to restore delivery, or disable alerts below."
+            !status.permissionGranted && permissionDenied ->
+                "Notification permission was not granted. Alerts remain off. " +
+                    "You can allow notifications in Android settings; we will not prompt again automatically."
+            !status.permissionGranted ->
+                "Notification permission is not granted. Tap Enable alerts to request it."
+            else -> null
         }
-        if (!status.appNotificationsEnabled) {
+        blocker?.let {
             Text(
-                "Android is blocking app notifications. Allow notifications in Android settings to receive alerts.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
-            )
-        }
-        if (status.channelBlocked) {
-            Text(
-                "The Service reminders notification channel is blocked. Enable it in Android settings to receive alerts.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
-            )
-        }
-        if (settingsUnavailable) {
-            Text(
-                "Could not open Android settings. Open Settings manually and find this app’s notification settings.",
+                it,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
             )

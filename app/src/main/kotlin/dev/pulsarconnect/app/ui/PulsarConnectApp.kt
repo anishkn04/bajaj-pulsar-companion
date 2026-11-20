@@ -36,6 +36,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
@@ -91,7 +92,7 @@ fun PulsarConnectApp(
     }
 }
 
-private enum class NavDestination { HOME, BIKE, TRIPS, REMINDERS, SETTINGS }
+private enum class NavDestination { HOME, BIKE, TRIPS, FUEL, REMINDERS, SETTINGS }
 
 private data class NavItem(
     val destination: NavDestination,
@@ -200,7 +201,8 @@ private fun SignedInScreen(
             snackbarHost = { SnackbarHost(snackbarHostState) },
             bottomBar = {
                 PulsarNavigationBar(
-                    selected = navDestination,
+                    // Fuel is a Home sub-screen, so keep the Home tab highlighted there.
+                    selected = if (navDestination == NavDestination.FUEL) NavDestination.HOME else navDestination,
                     onSelected = { navDestination = it },
                 )
             },
@@ -223,6 +225,14 @@ private fun SignedInScreen(
                         onClearFilter = viewModel::clearTripFilter,
                         onClearError = viewModel::clearError,
                         onRetry = viewModel::retryLocalRecords,
+                    )
+                    NavDestination.FUEL -> FuelScreen(
+                        state = state,
+                        onAddFillUp = viewModel::addFillUp,
+                        onDeleteFillUp = viewModel::deleteFillUp,
+                        onClearError = viewModel::clearError,
+                        onRetry = viewModel::retryLocalRecords,
+                        onBack = { navDestination = NavDestination.HOME },
                     )
                     NavDestination.REMINDERS -> RemindersScreen(
                         state = state,
@@ -249,6 +259,8 @@ private fun SignedInScreen(
                         onPhoneStatusChange = bleViewModel::setMirroring,
                         onCallerNameChange = bleViewModel::setMirrorCallerName,
                         onMissedCallChange = bleViewModel::setMirrorMissedCalls,
+                        onNavigationMirrorChange = bleViewModel::setMirrorNavigation,
+                        onNavWireModeChange = bleViewModel::setNavWireMode,
                         onOpenNotificationSettings = {
                             openNotificationAccessSettings(context)
                         },
@@ -279,6 +291,7 @@ private fun SignedInScreen(
                         bleState = bleState,
                         onSignOut = viewModel::signOut,
                         onTrips = { navDestination = NavDestination.TRIPS },
+                        onFuel = { navDestination = NavDestination.FUEL },
                         onReminders = { navDestination = NavDestination.REMINDERS },
                         onBike = { navDestination = NavDestination.BIKE },
                         onSettings = { navDestination = NavDestination.SETTINGS },
@@ -329,7 +342,7 @@ private fun PulsarNavigationBar(
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = MaterialTheme.colorScheme.primary,
                         selectedTextColor = MaterialTheme.colorScheme.primary,
-                        indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
+                        indicatorColor = Color.Transparent,
                         unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
                         unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     ),

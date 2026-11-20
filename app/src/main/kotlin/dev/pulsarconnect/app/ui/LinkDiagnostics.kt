@@ -12,6 +12,11 @@ import dev.pulsarconnect.core.ble.linkFailureLogMessage
 /** How many recent events the diagnostics card shows before the rider opens the full export. */
 internal const val LINK_LOG_RECENT_LIMIT = 8
 
+private const val PERMISSION_BLOCKER =
+    "Bluetooth permission is missing. Grant nearby-device access."
+private const val BLUETOOTH_OFF_BLOCKER =
+    "Bluetooth is turned off. Turn it on to reach the bike."
+
 internal data class LinkDiagnostics(
     val blocker: String,
     val background: String,
@@ -44,10 +49,10 @@ internal fun linkDiagnostics(state: BleUiState): LinkDiagnostics {
 internal fun linkBlocker(state: BleUiState): String {
     val connection = state.connection
     if (state.missingPermissions.isNotEmpty() || connection is ConnectionState.MissingPermissions) {
-        return "Bluetooth permission is missing. Grant nearby-device access."
+        return PERMISSION_BLOCKER
     }
     if (state.adapterState == AdapterState.OFF || connection is ConnectionState.BluetoothUnavailable) {
-        return "Bluetooth is turned off. Turn it on to reach the bike."
+        return BLUETOOTH_OFF_BLOCKER
     }
     if (state.selected == null) {
         return "No bike is selected. Scan for your bike and choose its link."
@@ -71,10 +76,8 @@ internal fun linkBlocker(state: BleUiState): String {
         is ConnectionState.Discovering,
         is ConnectionState.Reconnecting,
         -> "Connecting to the bike…"
-        is ConnectionState.MissingPermissions ->
-            "Bluetooth permission is missing. Grant nearby-device access."
-        is ConnectionState.BluetoothUnavailable ->
-            "Bluetooth is turned off. Turn it on to reach the bike."
+        is ConnectionState.MissingPermissions -> PERMISSION_BLOCKER
+        ConnectionState.BluetoothUnavailable -> BLUETOOTH_OFF_BLOCKER
         ConnectionState.Idle ->
             if (state.settings.mirroring) {
                 "Mirroring is armed, but the link has not connected yet."

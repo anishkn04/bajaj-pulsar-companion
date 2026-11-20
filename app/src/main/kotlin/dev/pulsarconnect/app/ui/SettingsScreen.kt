@@ -135,12 +135,6 @@ internal fun SettingsScreen(
         )
 
         SectionCard(title = "Appearance") {
-            Text(
-                "System follows this phone's light or dark setting. Your choice is remembered " +
-                    "after the app restarts and sign-out.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -161,11 +155,7 @@ internal fun SettingsScreen(
             PulsarDivider()
             PulsarSwitchRow(
                 title = "Use system accent colors",
-                description = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    "Match the wallpaper palette on Android 12 and newer."
-                } else {
-                    "Available on Android 12 and newer; this phone keeps Pulsar colors."
-                },
+                description = null,
                 checked = themeSettings.dynamicColor,
                 onCheckedChange = onDynamicColorChange,
                 enabled = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S,
@@ -176,8 +166,7 @@ internal fun SettingsScreen(
             PulsarSwitchRow(
                 title = "Require biometrics to open",
                 description = when (biometricStatus) {
-                    BiometricStatus.AVAILABLE ->
-                        "Ask for your fingerprint or face after the app has been in the background."
+                    BiometricStatus.AVAILABLE -> null
                     BiometricStatus.NOT_ENROLLED ->
                         "Add a fingerprint or face unlock in system settings first."
                     BiometricStatus.NO_HARDWARE -> "This phone has no biometric sensor."
@@ -248,7 +237,7 @@ internal fun SettingsScreen(
             )
             PulsarSwitchRow(
                 title = "Redact VIN in export",
-                description = "Replace the VIN with a placeholder before sharing the file.",
+                description = null,
                 checked = redactVin,
                 onCheckedChange = { redactVin = it },
                 enabled = !backupBusy,
@@ -268,21 +257,9 @@ internal fun SettingsScreen(
                 enabled = !backupBusy,
                 style = PillStyle.Outlined,
             )
-            Text(
-                "Restoring affects only the bike you are signed in to. Merge keeps current records " +
-                    "and adds missing ones; Replace removes this bike's current records first.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
 
         SectionCard(title = "Battery optimization") {
-            Text(
-                "If mirroring stops shortly after you leave the app, add Pulsar Connect to the " +
-                    "battery-optimization exempt list so the foreground service is not killed.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             PillButton(
                 label = "Open battery settings",
                 onClick = onOpenBatteryOptimization,

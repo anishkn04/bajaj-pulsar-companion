@@ -18,8 +18,10 @@ import kotlinx.coroutines.yield
  *
  * Battery/signal always flow at the native cadence. Call events are opt-in through
  * [callOptions]: caller text is added to the GENERAL frame while ringing/active, and a missed
- * call triggers one fixed MISS_CALL frame ahead of the next status frame. There is a single
- * writer loop, so call and status frames can never interleave.
+ * call triggers one fixed MISS_CALL frame ahead of the next status frame. Experimental turn-by-turn
+ * navigation cues are opt-in through [navOptions] and ride in the same 30-byte text slot only
+ * when no real phone call is ringing or active. There is a single writer loop, so call, nav, and
+ * status frames can never interleave.
  *
  * The caller owns start/stop. [onStopped] runs once when the loop exits on its own: with a
  * failure when sending failed, or with `null` after a clean stop such as a disconnect or an
@@ -31,6 +33,9 @@ class PhoneStatusSender(
     private val scope: CoroutineScope,
     private val callEvents: Flow<CallEvent> = emptyFlow(),
     private val callOptions: () -> CallMirrorOptions = { CallMirrorOptions() },
+    private val navEvents: Flow<NavEvent> = emptyFlow(),
+    private val navOptions: () -> NavMirrorOptions = { NavMirrorOptions() },
+    private val onNavPreview: (String?) -> Unit = {},
     private val intervalMillis: Long = DEFAULT_INTERVAL_MILLIS,
     private val initialHeartbeat: Int = 1,
     private val onStopped: (Throwable?) -> Unit = {},
@@ -70,6 +75,7 @@ class PhoneStatusSender(
         sentThisRun = false
         job?.cancel()
         job = null
+        onNavPreview(null)
     }
 
     private suspend fun sendLoop() {
@@ -78,6 +84,7 @@ class PhoneStatusSender(
             coroutineScope {
                 val latest = MutableStateFlow<PhoneStatus?>(null)
                 val call = MutableStateFlow(CallSnapshot())
+                val nav = MutableStateFlow<String?>(null)
                 val missedCallPending = AtomicBoolean(false)
 
                 val statusJob = launch { statuses.collect { latest.value = it } }
@@ -93,6 +100,21 @@ class PhoneStatusSender(
                             CallEvent.Ended -> call.value = CallSnapshot()
                             CallEvent.Missed -> if (callOptions().missedCalls) {
                                 missedCallPending.set(true)
+                            }
+                        }
+                    }
+                }
+                val navJob = launch {
+                    navEvents.collect { event ->
+                        when (event) {
+                            is NavEvent.Update -> if (navOptions().enabled) {
+                                val wire = NavText.wireText(event.text).ifEmpty { null }
+                                nav.value = wire
+                                onNavPreview(wire)
+                            }
+                            NavEvent.Ended -> {
+                                nav.value = null
+                                onNavPreview(null)
                             }
                         }
                     }
@@ -115,10 +137,37 @@ class PhoneStatusSender(
                             if (connection.sendMissedCall()) markSent()
                         }
                         val options = callOptions()
+                        val navOpts = navOptions()
                         val snapshot = call.value
-                        val state = if (options.callerName) snapshot.state else CallState.NO_CALL
-                        val name = if (options.callerName) snapshot.callerName else null
-                        if (!connection.sendPhoneStatus(current, heartbeat, state, name)) break
+                        val realCallActive = options.callerName &&
+                            (snapshot.state == CallState.INCOMING_CALL || snapshot.state == CallState.ACTIVE_CALL)
+                        val activeNav = if (navOpts.enabled) nav.value else null
+                        if (!navOpts.enabled && nav.value != null) {
+                            nav.value = null
+                            onNavPreview(null)
+                        }
+
+                        val sent = when {
+                            realCallActive -> connection.sendPhoneStatus(
+                                status = current,
+                                heartbeat = heartbeat,
+                                callState = snapshot.state,
+                                callerName = snapshot.callerName,
+                            )
+                            activeNav != null -> connection.sendPhoneStatus(
+                                status = current,
+                                heartbeat = heartbeat,
+                                callState = navOpts.wireMode.callState,
+                                navText = activeNav,
+                            )
+                            else -> connection.sendPhoneStatus(
+                                status = current,
+                                heartbeat = heartbeat,
+                                callState = CallState.NO_CALL,
+                                callerName = null,
+                            )
+                        }
+                        if (!sent) break
                         heartbeat = nextHeartbeat(heartbeat)
                         markSent()
                         delay(intervalMillis)
@@ -127,6 +176,8 @@ class PhoneStatusSender(
                 } finally {
                     statusJob.cancel()
                     callJob.cancel()
+                    navJob.cancel()
+                    onNavPreview(null)
                 }
             }
             onStopped(null)

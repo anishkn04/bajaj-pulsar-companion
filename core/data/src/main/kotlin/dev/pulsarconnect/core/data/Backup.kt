@@ -1,6 +1,7 @@
 package dev.pulsarconnect.core.data
 
 import dev.pulsarconnect.core.model.BikeProfile
+import dev.pulsarconnect.core.model.FuelFillUp
 import dev.pulsarconnect.core.model.OdometerReading
 import dev.pulsarconnect.core.model.ServiceReminder
 import dev.pulsarconnect.core.model.TelemetryPoint
@@ -13,7 +14,7 @@ import kotlinx.serialization.json.Json
 /** Placeholder written instead of a VIN when the rider redacts identifying data. */
 const val REDACTED_VIN = "REDACTED-VIN"
 
-const val BACKUP_SCHEMA_VERSION = 3
+const val BACKUP_SCHEMA_VERSION = 4
 
 /** Oldest backup this app can still import. v1 predates recurring reminder fields. */
 const val MIN_BACKUP_SCHEMA_VERSION = 1
@@ -35,12 +36,15 @@ data class LocalBackup(
     val reminders: List<ServiceReminder>,
     /** Hand-entered odometer reading; absent from schema 1 and 2 backups. */
     val odometer: OdometerReading? = null,
+    /** Manual fuel fill-ups; absent from schema 1–3 backups. */
+    val fillUps: List<FuelFillUp> = emptyList(),
 )
 
 data class RestoreSummary(
     val trips: Int,
     val telemetryPoints: Int,
     val reminders: Int,
+    val fillUps: Int = 0,
     /** IDs of reminders that were newly written, so their alerts can be re-armed. */
     val restoredReminderIds: List<Long> = emptyList(),
 )
@@ -82,6 +86,16 @@ object LocalBackupCodec {
         require(backup.telemetry.all { it.tripId in tripIds }) {
             "This backup contains ride samples that do not belong to one of its trips."
         }
+        require(backup.fillUps.all { it.id != null }) {
+            "This backup contains a fill-up without an ID."
+        }
+        // Restores may insert history, so the whole set is checked in order rather than against
+        // the current latest reading.
+        val orderedFillUps = backup.fillUps.sortedBy { it.odometerKm }
+        require(orderedFillUps.zipWithNext().all { (first, second) -> second.odometerKm > first.odometerKm }) {
+            "This backup contains fill-ups with non-increasing odometer readings."
+        }
+        backup.fillUps.forEach(::requireValidFillUp)
         return backup
     }
 }
@@ -92,6 +106,7 @@ class LocalBackupService(
     private val reminders: ReminderRepository,
     private val bikes: BikeRepository,
     private val odometers: OdometerRepository,
+    private val fuels: FuelRepository,
 ) {
     suspend fun export(vin: String, redactVin: Boolean, exportedAtMillis: Long): LocalBackup {
         val bike = bikes.getBike(vin) ?: BikeProfile(vin, null, null, null, null)
@@ -101,6 +116,7 @@ class LocalBackupService(
         }
         val savedReminders = reminders.getReminders(vin)
         val savedOdometer = odometers.getLatest(vin)
+        val savedFillUps = fuels.getFillUps(vin)
         fun <T> List<T>.redact(transform: (T) -> T): List<T> =
             if (redactVin) map(transform) else this
         return LocalBackup(
@@ -113,6 +129,7 @@ class LocalBackupService(
             odometer = savedOdometer?.let {
                 if (redactVin) it.copy(vin = REDACTED_VIN) else it
             },
+            fillUps = savedFillUps.redact { it.copy(vin = REDACTED_VIN) },
         )
     }
 
@@ -133,6 +150,9 @@ class LocalBackupService(
             }
             reminders.getReminders(vin).forEach { reminder ->
                 reminder.id?.let { reminders.deleteReminder(it) }
+            }
+            fuels.getFillUps(vin).forEach { fillUp ->
+                fillUp.id?.let { fuels.deleteFillUp(it) }
             }
         }
 
@@ -169,10 +189,31 @@ class LocalBackupService(
                 odometers.setReading(vin, reading.odometerKm, reading.recordedAtMillis)
             }
         }
+
+        var importedFillUps = 0
+        var highestImportedFillUp: FuelFillUp? = null
+        for (fillUp in rebound.fillUps) {
+            val fillUpId = requireNotNull(fillUp.id)
+            if (fuels.getFillUp(fillUpId) != null) continue
+            fuels.restoreFillUp(fillUp)
+            importedFillUps++
+            if (highestImportedFillUp == null || fillUp.odometerKm > highestImportedFillUp.odometerKm) {
+                highestImportedFillUp = fillUp
+            }
+        }
+        // A fill-up is a real odometer reading; keep reminder due states current without asking
+        // the rider to enter the same number twice. Skipped merge rows leave the local value alone.
+        highestImportedFillUp?.let { latest ->
+            val existing = odometers.getLatest(vin)
+            if (existing == null || latest.odometerKm > existing.odometerKm) {
+                odometers.setReading(vin, latest.odometerKm, latest.filledAtMillis)
+            }
+        }
         return RestoreSummary(
             trips = importedTrips,
             telemetryPoints = importedTelemetry,
             reminders = restoredReminderIds.size,
+            fillUps = importedFillUps,
             restoredReminderIds = restoredReminderIds,
         )
     }
@@ -192,11 +233,15 @@ class LocalBackupService(
         require(backup.odometer == null || backup.odometer.vin in allowed) {
             "This backup contains an odometer reading for a different bike."
         }
+        require(backup.fillUps.all { it.vin in allowed }) {
+            "This backup contains fill-ups for a different bike."
+        }
         return backup.copy(
             bike = backup.bike.copy(vin = vin),
             trips = backup.trips.map { it.copy(vin = vin) },
             reminders = backup.reminders.map { it.copy(vin = vin) },
             odometer = backup.odometer?.copy(vin = vin),
+            fillUps = backup.fillUps.map { it.copy(vin = vin) },
         )
     }
 
@@ -212,6 +257,10 @@ class LocalBackupService(
         }
         for (reminder in backup.reminders) {
             val existing = reminders.getReminder(requireNotNull(reminder.id))
+            if (existing != null && existing.vin != vin) throw IllegalArgumentException(conflict)
+        }
+        for (fillUp in backup.fillUps) {
+            val existing = fuels.getFillUp(requireNotNull(fillUp.id))
             if (existing != null && existing.vin != vin) throw IllegalArgumentException(conflict)
         }
     }
