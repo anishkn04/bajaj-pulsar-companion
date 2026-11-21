@@ -217,7 +217,7 @@ internal fun SettingsScreen(
         SectionCard(title = "Navigation") {
             PulsarSwitchRow(
                 title = "Mirror navigation to cluster",
-                description = "Sends arrow, distance and road cues through the cluster's incoming-call text slot. Real calls always take priority.",
+                description = "Sends letter, distance and road cues through the cluster's incoming-call text slot. Real calls always take priority.",
                 checked = bleState.navigationMirrorEnabled,
                 onCheckedChange = onNavigationMirrorChange,
                 enabled = bleState.notificationAccessGranted,
