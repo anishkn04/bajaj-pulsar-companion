@@ -75,11 +75,13 @@ while ringing and the missed-call icon after an unanswered call. See
 
 Navigation mirroring is a third **opt-in, off by default** feature, enabled from Settings once
 notification access is granted. It reads ongoing Google Maps or Organic Maps turn notifications
-and writes compact `arrow distance road` cues into the same incoming-call text slot of the
-periodic phone-status frame. It never opens a call, never uses `ACTIVE_CALL`, and a real call
-always takes priority. Native TBT frames were ignored by the N150 and ALERT frames showed only
-an icon, so neither is used. The Bike link screen shows a read-only live cue preview with its
-30-byte size.
+and writes compact `LETTER DISTANCE ROAD` cues into the same incoming-call text slot of the
+periodic phone-status frame. The maneuver letter is `L` (left), `R` (right), `S` (straight),
+`U` (U-turn), `O` (roundabout), `A` (arrival), `M` (merge) or `E` (exit); letters are used because
+the cluster's segmented display does not render arrow glyphs. It never opens a call, never uses
+`ACTIVE_CALL`, and a real call always takes priority. Native TBT frames were ignored by the N150
+and ALERT frames showed only an icon, so neither is used. The Bike link screen shows a read-only
+live cue preview with its 30-byte size.
 
 ## Background service alerts
 

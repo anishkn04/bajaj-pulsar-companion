@@ -155,12 +155,14 @@ already riding. Make health and failures visible without opening the app.
   capture with a known route and odometer readings is available and decoded. Do not guess
   frames or ship unverified decoding.
 - [x] **PC-26 — Incoming-call text navigation mirror.**
-  Restore the live-verified approach: compact `arrow distance road` cues from Google Maps and
+  Restore the live-verified approach: compact `LETTER DISTANCE ROAD` cues from Google Maps and
   Organic Maps notifications are written to the 30-byte caller-name slot with `INCOMING_CALL`
-  only. No `ACTIVE_CALL`, no wire-mode selector, no native TBT or ALERT paths; a real call always
-  wins. Settings holds the opt-in before connecting, and the Bike link screen shows a read-only
-  live cue preview. Parser tests cover current Maps title shapes, byte capping and word-boundary
-  truncation; wire tests cover incoming-call encoding, real-call priority and route-end clearing.
+  only. Maneuvers use `L`/`R`/`S`/`U`/`O`/`A`/`M`/`E` because the N150's segmented display does not
+  render arrow glyphs. No `ACTIVE_CALL`, no wire-mode selector, no native TBT or ALERT paths; a
+  real call always wins. Settings holds the opt-in before connecting, and the Bike link screen
+  shows a read-only live cue preview. Parser tests cover letter mapping, current Maps title
+  shapes, byte capping and word-boundary truncation; wire tests cover incoming-call encoding,
+  real-call priority and route-end clearing.
 
 ## Recently completed
 

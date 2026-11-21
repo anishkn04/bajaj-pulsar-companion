@@ -250,12 +250,15 @@ text) of the normal once-per-second phone-status frame. The wire call state is f
 never sets `ACTIVE_CALL` for a cue, never presents navigation as a call, and a real incoming
 or active call immediately takes priority. Ending navigation clears the cue on the next frame.
 
-Cues are ordered `ARROW DISTANCE ROAD`, for example `^ Sangam Tole Marg`, `> 90m` or
-`> 250m MG Rd`. The arrow encodes the maneuver, the number is the step distance, and the road
-name is appended only while whole words fit; total route distance, ETA and locations are not
-written or stored. Native turn-by-turn and ALERT transports were tested but rejected for this
-bike: TBT frames produced no visible cue and ALERT produced an icon without usable text. There
-is no rider-facing wire-mode selector and no ongoing-call switcher.
+Cues are ordered `LETTER DISTANCE ROAD`, for example `S Sangam Tole Marg`, `R 90m` or
+`R 250m MG Rd`. The single letter encodes the maneuver (`L` left/slight-left/sharp-left/keep-left,
+`R` right variants, `S` straight/continue/head, `U` U-turn, `O` roundabout, `A` arrival, `M` merge,
+`E` exit); letters are used because the N150's segmented display does not render arrow glyphs.
+The number is the step distance, and the road name is appended only while whole words fit; total
+route distance, ETA and locations are not written or stored. Native turn-by-turn and ALERT
+transports were tested but rejected for this bike: TBT frames produced no visible cue and ALERT
+produced an icon without usable text. There is no rider-facing wire-mode selector and no
+ongoing-call switcher.
 
 Live speed/RPM/fuel/gear telemetry is still not established. The capture's ACTION
 characteristic (`0a10676e-6972-6565-6e69-676e4543544f`) returns 26-byte read

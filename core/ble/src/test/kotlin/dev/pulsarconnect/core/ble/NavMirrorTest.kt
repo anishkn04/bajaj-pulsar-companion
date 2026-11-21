@@ -15,11 +15,13 @@ import org.junit.jupiter.api.Test
 class NavMirrorTest {
 
     @Test
-    fun `NavText preserves digits and normalizes arrows within 30 bytes`() {
+    fun `NavText preserves digits and converts arrows to maneuver letters within 30 bytes`() {
         val raw = "250m → MG Road International Boulevard"
         val wire = NavText.wireText(raw)
         assertTrue(wire.toByteArray(Charsets.UTF_8).size <= 30)
-        assertTrue(wire.startsWith("250m > MG Road"))
+        assertTrue(wire.startsWith("250m R MG Road"))
+        assertEquals("L S U", NavText.wireText("← ↑ ↺"))
+        assertEquals("R 90m", NavText.wireText("> 90m"))
     }
 
     @Test
@@ -27,14 +29,14 @@ class NavMirrorTest {
         val frame = PhoneStatusProtocol.encodeNavigation(
             status = PhoneStatus(batteryPercent = 85, signalLevel = 3),
             heartbeat = 7,
-            navText = "> 250m NH48",
+            navText = "R 250m NH48",
         )
         assertEquals(PhoneStatusProtocol.FRAME_SIZE, frame.size)
         // batteryLevel 4 (85%) shifted by 3 | INCOMING_CALL (1) = 0x21
         assertEquals(0x21.toByte(), frame[1])
         assertEquals(0.toByte(), frame[3])
         assertEquals(1.toByte(), frame[4])
-        assertEquals("> 250m NH48", decodeCallerSlot(frame))
+        assertEquals("R 250m NH48", decodeCallerSlot(frame))
     }
 
     @Test
@@ -78,7 +80,7 @@ class NavMirrorTest {
             assertTrue(sender.start())
             runCurrent()
 
-            navEvents.emit(NavEvent.Update("> 250m MG Rd"))
+            navEvents.emit(NavEvent.Update("R 250m MG Rd"))
             runCurrent()
             advanceTimeBy(1_000)
             runCurrent()
@@ -86,7 +88,7 @@ class NavMirrorTest {
             assertEquals(CallState.INCOMING_CALL.wireValue, navFrame[1].toInt() and 0x07)
             assertEquals(0, navFrame[3].toInt())
             assertEquals(1, navFrame[4].toInt())
-            assertEquals("> 250m MG Rd", decodeCallerSlot(navFrame))
+            assertEquals("R 250m MG Rd", decodeCallerSlot(navFrame))
 
             // Real incoming call preempts nav cue immediately on the next tick.
             callEvents.emit(CallEvent.Incoming("Alice"))
@@ -104,7 +106,7 @@ class NavMirrorTest {
             runCurrent()
             val resumedNavFrame = fake.latestSession.writes.last().bytes
             assertEquals(CallState.INCOMING_CALL.wireValue, resumedNavFrame[1].toInt() and 0x07)
-            assertEquals("> 250m MG Rd", decodeCallerSlot(resumedNavFrame))
+            assertEquals("R 250m MG Rd", decodeCallerSlot(resumedNavFrame))
 
             // Disabling nav mirror stops writing text on the next frame.
             navEnabled = false

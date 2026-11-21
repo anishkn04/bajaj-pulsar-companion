@@ -21,9 +21,10 @@ data class NavNotificationSnapshot(
  * Condenses ongoing turn-by-turn notifications from Google Maps and Organic Maps into compact
  * ASCII strings (`<= 30` UTF-8 bytes) suitable for the Pulsar N150's 30-byte caller-text BLE slot.
  *
- * Cues are ordered `ARROW DISTANCE ROAD`: the maneuver glyph and step distance are always kept,
- * and a road name is appended only while whole words still fit. Total route distance and ETA are
- * deliberately ignored — the cluster has no room for them and they are not step instructions.
+ * Cues are ordered `CODE DISTANCE ROAD`: a single-letter maneuver code and the step distance are
+ * always kept, and a road name is appended only while whole words still fit. Letters render on the
+ * N150's segmented display, unlike arrow glyphs. Total route distance and ETA are deliberately
+ * ignored — the cluster has no room for them and they are not step instructions.
  */
 class NavNotificationParser(
     packages: Set<String> = DEFAULT_PACKAGES,
@@ -43,12 +44,12 @@ class NavNotificationParser(
         if (NON_TURN_MARKERS.any { combined.equals(it, ignoreCase = true) }) return null
         if (TRANSIENT_MARKERS.any { combined.contains(it, ignoreCase = true) }) return null
 
-        val arrow = detectManeuverToken(combined)
+        val code = detectManeuverCode(combined)
         val distance = extractDistance(title) ?: extractDistance(text)
         val road = extractRoad(title, text)
 
         val parts = buildList {
-            arrow?.let(::add)
+            code?.let(::add)
             distance?.let(::add)
         }
         return fitCue(parts, road).takeIf { it.isNotEmpty() }
@@ -73,18 +74,25 @@ class NavNotificationParser(
         return "$number$compactUnit"
     }
 
-    private fun detectManeuverToken(text: String): String? {
+    /** Single letters are used because the N150's segmented display does not render arrow glyphs. */
+    private fun detectManeuverCode(text: String): String? {
         val lower = text.lowercase()
         return when {
             lower.contains("u-turn") || lower.contains("uturn") -> "U"
-            lower.contains("roundabout") || lower.contains("rotary") -> "@"
-            lower.contains("arrive") || lower.contains("destination") -> "*"
-            lower.contains("slight right") || lower.contains("keep right") || lower.contains("bear right") -> "/>"
-            lower.contains("slight left") || lower.contains("keep left") || lower.contains("bear left") -> "\\<"
-            lower.contains("sharp right") || lower.contains("turn right") || lower.contains("right onto") || lower.contains("right") -> ">"
-            lower.contains("sharp left") || lower.contains("turn left") || lower.contains("left onto") || lower.contains("left") -> "<"
-            lower.contains("merge") || lower.contains("exit") -> ">>"
-            lower.contains("straight") || lower.contains("continue") || lower.contains("head ") -> "^"
+            lower.contains("roundabout") || lower.contains("rotary") -> "O"
+            lower.contains("arrive") || lower.contains("destination") -> "A"
+            lower.contains("merge") -> "M"
+            lower.contains("exit") -> "E"
+            lower.contains("slight right") || lower.contains("keep right") ||
+                lower.contains("bear right") || lower.contains("sharp right") ||
+                lower.contains("turn right") || lower.contains("right onto") ||
+                lower.contains("right") -> "R"
+            lower.contains("slight left") || lower.contains("keep left") ||
+                lower.contains("bear left") || lower.contains("sharp left") ||
+                lower.contains("turn left") || lower.contains("left onto") ||
+                lower.contains("left") -> "L"
+            lower.contains("straight") || lower.contains("continue") ||
+                lower.contains("head ") -> "S"
             else -> null
         }
     }
@@ -103,7 +111,7 @@ class NavNotificationParser(
     }
 
     /**
-     * Keeps the arrow and distance intact, then adds only whole road words that fit in the
+     * Keeps the maneuver code and distance intact, then adds only whole road words that fit in the
      * 30-byte caller slot. A long road name is truncated at a word boundary rather than mid-word.
      */
     private fun fitCue(priority: List<String>, road: String?): String {
@@ -154,7 +162,7 @@ class NavNotificationParser(
             RegexOption.IGNORE_CASE,
         )
         private val LEADING_PHRASE_REGEX = Regex(
-            """^(?:make\s+a\s+u-?turn|turn\s+(?:sharp\s+|slight\s+)?(?:left|right)|(?:keep|bear|slight)\s+(?:left|right)|continue(?:\s+straight)?|head\s+(?:(?:north|south|east|west|northeast|northwest|southeast|southwest)|towards?|to)|take\s+(?:the\s+)?exit(?:\s+toward)?|at\s+the\s+roundabout(?:\s+take)?)\s*(?:to\s+stay\s+on|stay\s+on|onto|on|toward|towards|to)?\s*""",
+            """^(?:(?:make\s+a\s+)?u-?turn|turn\s+(?:sharp\s+|slight\s+)?(?:left|right)|(?:sharp|slight|keep|bear)\s+(?:left|right)|continue(?:\s+straight)?|head\s+(?:(?:north|south|east|west|northeast|northwest|southeast|southwest)|towards?|to)|merge(?:\s+onto)?|arrive(?:\s+(?:at|in))?|take\s+(?:the\s+)?exit(?:\s+toward)?|exit(?:\s+(?:onto|toward))?|at\s+the\s+roundabout(?:\s+take)?)\s*(?:to\s+stay\s+on|stay\s+on|onto|on|toward|towards|to|the\s+\w+\s+exit\s+onto)?\s*""",
             RegexOption.IGNORE_CASE,
         )
         private val NON_TURN_MARKERS = setOf(
@@ -172,7 +180,7 @@ class NavNotificationParser(
             "gps signal lost",
         )
         private val INSTRUCTION_ONLY = Regex(
-            """(?:turn\s+)?(?:sharp\s+|slight\s+)?(?:left|right|straight)|stay\s+on|head(?:\s+\w+)?|continue(?:\s+straight)?|(?:keep|bear)\s+(?:left|right)|arriv\w*|destination""",
+            """(?:turn\s+)?(?:sharp\s+|slight\s+)?(?:left|right|straight)|stay\s+on|head(?:\s+\w+)?|continue(?:\s+straight)?|(?:keep|bear)\s+(?:left|right)|(?:make\s+a\s+)?u-?turn|roundabout|rotary|merge|exit|arriv\w*|destination""",
             RegexOption.IGNORE_CASE,
         )
         private val ROAD_ABBREVIATIONS: List<Pair<Regex, String>> = listOf(

@@ -24,8 +24,9 @@ data class NavMirrorOptions(val enabled: Boolean = false)
  * Formats and caps navigation strings for the 30-byte caller-text area (`bytes[21..50]`).
  *
  * Unlike [CallerName], numeric values (distances like `250m`, highway numbers like `NH48`) are
- * legitimate navigation cues and must not be replaced by a fallback label. Non-ASCII characters
- * are normalized to safe ASCII tokens so segmented/dot-matrix bike LCDs never show blank boxes.
+ * legitimate navigation cues and must not be replaced by a fallback label. Arrows and legacy symbol
+ * tokens are normalized to single-letter maneuver codes (`L`, `R`, `S`, `U`, `O`, `A`, `M`, `E`) so
+ * the N150's segmented/dot-matrix display never shows blank boxes or unsupported glyphs.
  */
 object NavText {
     const val MAX_BYTES: Int = CallerName.MAX_BYTES
@@ -34,16 +35,19 @@ object NavText {
 
     fun sanitize(raw: String?): String {
         if (raw.isNullOrBlank()) return ""
-        val sb = StringBuilder(raw.length)
-        for (ch in raw) {
+        val normalized = raw
+            .replace(">>", "M")
+            .replace("/>", "R")
+            .replace("\\<", "L")
+        val sb = StringBuilder(normalized.length)
+        for (ch in normalized) {
             when (ch) {
-                '→', '↱', '➡', '➔' -> sb.append('>')
-                '←', '↰', '⬅' -> sb.append('<')
-                '↑', '⬆' -> sb.append('^')
-                '↓', '⬇' -> sb.append('v')
+                '→', '↱', '➡', '➔', '↗', '↘', '>' -> sb.append('R')
+                '←', '↰', '⬅', '↖', '↙', '<' -> sb.append('L')
+                '↑', '⬆', '^' -> sb.append('S')
                 '↺', '↻', '↶', '↷' -> sb.append('U')
-                '↗', '↘' -> sb.append("/>")
-                '↖', '↙' -> sb.append("\\<")
+                '@' -> sb.append('O')
+                '*' -> sb.append('A')
                 '·', '•' -> sb.append(' ')
                 '–', '—' -> sb.append('-')
                 else -> if (ch.code in 0x20..0x7E) sb.append(ch)

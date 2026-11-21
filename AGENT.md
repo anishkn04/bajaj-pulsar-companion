@@ -54,8 +54,9 @@ natives into the APK.
   disarms them.
 - Caller-name and missed-call mirroring stay opt-in and **off by default**. Unknown callers show
   `"Incoming call"`. Never send or store a phone number.
-- Navigation mirroring is opt-in and **off by default**. It writes compact arrow, distance and
-  road cues through the incoming-call text slot only: wire call state is always `INCOMING_CALL`,
+- Navigation mirroring is opt-in and **off by default**. It writes compact letter-coded maneuver,
+  distance and road cues through the incoming-call text slot only (`L`/`R`/`S`/`U`/`O`/`A`/`M`/`E`):
+  wire call state is always `INCOMING_CALL`,
   never `ACTIVE_CALL`, and a real call always wins. The N150 ignored native TBT frames and showed
   only an icon for ALERT frames, so those transports are not implemented. The switch lives in
   Settings and is available before the bike connects; notification access is its only gate.
